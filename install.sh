@@ -5,6 +5,8 @@ APP_NAME="oxygen-monitor"
 INSTALL_DIR="${INSTALL_DIR:-/opt/${APP_NAME}}"
 SERVICE_NAME="${SERVICE_NAME:-oxygen-monitor.service}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
+CONFIG_PATH="${INSTALL_DIR}/oxygen-monitor.conf"
+CONFIG_EXAMPLE_PATH="${INSTALL_DIR}/oxygen-monitor.conf.example"
 APP_USER="${APP_USER:-pi}"
 APP_GROUP="${APP_GROUP:-${APP_USER}}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -14,7 +16,13 @@ HEIGHT="${HEIGHT:-320}"
 ROTATE="${ROTATE:-0}"
 I2C_BUS="${I2C_BUS:-1}"
 I2C_ADDRESS="${I2C_ADDRESS:-0x73}"
+MODBUS_HOST="${MODBUS_HOST:-0.0.0.0}"
 MODBUS_PORT="${MODBUS_PORT:-5020}"
+MODBUS_REGISTER_ADDRESS="${MODBUS_REGISTER_ADDRESS:-0}"
+SAMPLES="${SAMPLES:-10}"
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+MEASUREMENT_CALIBRATION_FACTOR="${MEASUREMENT_CALIBRATION_FACTOR:-0.774}"
+MAX_VALID_OXYGEN_PERCENT="${MAX_VALID_OXYGEN_PERCENT:-25.0}"
 ENABLE_INTERFACES="${ENABLE_INTERFACES:-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,6 +58,17 @@ require_file() {
 require_file "${SCRIPT_DIR}/oxygen_monitor.py"
 require_file "${SCRIPT_DIR}/requirements.txt"
 require_file "${SCRIPT_DIR}/oxygen-monitor.service"
+require_file "${SCRIPT_DIR}/oxygen-monitor.conf"
+
+install_if_needed() {
+  local mode="$1"
+  local source_path="$2"
+  local destination_path="$3"
+  if [[ "${source_path}" == "${destination_path}" ]]; then
+    return
+  fi
+  install -m "${mode}" "${source_path}" "${destination_path}"
+}
 
 if [[ "${SOURCE_IS_GIT_REPO}" -eq 0 ]]; then
   echo "Warning: ${SCRIPT_DIR} is not a Git clone."
@@ -93,10 +112,36 @@ echo "[4/10] Creating installation directory at ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"
 
 echo "[5/10] Copying application files..."
-install -m 0644 "${SCRIPT_DIR}/oxygen_monitor.py" "${INSTALL_DIR}/oxygen_monitor.py"
-install -m 0644 "${SCRIPT_DIR}/requirements.txt" "${INSTALL_DIR}/requirements.txt"
-install -m 0755 "${SCRIPT_DIR}/update.sh" "${INSTALL_DIR}/update.sh"
-install -m 0644 "${SCRIPT_DIR}/oxygen-monitor.service" "${INSTALL_DIR}/oxygen-monitor.service.template"
+install_if_needed 0644 "${SCRIPT_DIR}/oxygen_monitor.py" "${INSTALL_DIR}/oxygen_monitor.py"
+install_if_needed 0644 "${SCRIPT_DIR}/requirements.txt" "${INSTALL_DIR}/requirements.txt"
+install_if_needed 0755 "${SCRIPT_DIR}/update.sh" "${INSTALL_DIR}/update.sh"
+install_if_needed 0644 "${SCRIPT_DIR}/oxygen-monitor.service" "${INSTALL_DIR}/oxygen-monitor.service.template"
+install_if_needed 0644 "${SCRIPT_DIR}/oxygen-monitor.conf" "${CONFIG_EXAMPLE_PATH}"
+
+config_created=0
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+  install -m 0644 "${SCRIPT_DIR}/oxygen-monitor.conf" "${CONFIG_PATH}"
+  config_created=1
+fi
+
+if [[ "${config_created}" -eq 1 ]]; then
+  sed -i.bak \
+    -e "s|^I2C_BUS=.*|I2C_BUS=${I2C_BUS}|" \
+    -e "s|^I2C_ADDRESS=.*|I2C_ADDRESS=${I2C_ADDRESS}|" \
+    -e "s|^MODBUS_HOST=.*|MODBUS_HOST=${MODBUS_HOST}|" \
+    -e "s|^MODBUS_PORT=.*|MODBUS_PORT=${MODBUS_PORT}|" \
+    -e "s|^MODBUS_REGISTER_ADDRESS=.*|MODBUS_REGISTER_ADDRESS=${MODBUS_REGISTER_ADDRESS}|" \
+    -e "s|^FRAMEBUFFER=.*|FRAMEBUFFER=${FRAMEBUFFER}|" \
+    -e "s|^WIDTH=.*|WIDTH=${WIDTH}|" \
+    -e "s|^HEIGHT=.*|HEIGHT=${HEIGHT}|" \
+    -e "s|^ROTATE=.*|ROTATE=${ROTATE}|" \
+    -e "s|^SAMPLES=.*|SAMPLES=${SAMPLES}|" \
+    -e "s|^LOG_LEVEL=.*|LOG_LEVEL=${LOG_LEVEL}|" \
+    -e "s|^MEASUREMENT_CALIBRATION_FACTOR=.*|MEASUREMENT_CALIBRATION_FACTOR=${MEASUREMENT_CALIBRATION_FACTOR}|" \
+    -e "s|^MAX_VALID_OXYGEN_PERCENT=.*|MAX_VALID_OXYGEN_PERCENT=${MAX_VALID_OXYGEN_PERCENT}|" \
+    "${CONFIG_PATH}"
+  rm -f "${CONFIG_PATH}.bak"
+fi
 
 echo "[6/10] Creating Python virtual environment..."
 if [[ ! -x "${INSTALL_DIR}/.venv/bin/python" ]]; then
@@ -112,13 +157,6 @@ sed \
   -e "s|__APP_USER__|${APP_USER}|g" \
   -e "s|__APP_GROUP__|${APP_GROUP}|g" \
   -e "s|__INSTALL_DIR__|${INSTALL_DIR}|g" \
-  -e "s|__FRAMEBUFFER__|${FRAMEBUFFER}|g" \
-  -e "s|__WIDTH__|${WIDTH}|g" \
-  -e "s|__HEIGHT__|${HEIGHT}|g" \
-  -e "s|__ROTATE__|${ROTATE}|g" \
-  -e "s|__I2C_BUS__|${I2C_BUS}|g" \
-  -e "s|__I2C_ADDRESS__|${I2C_ADDRESS}|g" \
-  -e "s|__MODBUS_PORT__|${MODBUS_PORT}|g" \
   "${SCRIPT_DIR}/oxygen-monitor.service" > "${SERVICE_PATH}"
 
 echo "[9/10] Setting ownership and permissions..."

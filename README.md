@@ -14,6 +14,7 @@ The main application file is `oxygen_monitor.py`.
 - `requirements.txt`: Python dependencies
 - `install.sh`: automated installer for Raspberry Pi
 - `update.sh`: update script for code and dependencies
+- `oxygen-monitor.conf`: runtime configuration template
 - `oxygen-monitor.service`: systemd service template
 
 ## Hardware Notes
@@ -92,6 +93,7 @@ The installer:
 - installs dependencies
 - writes the `systemd` service
 - enables and starts the service
+- creates or updates `oxygen-monitor.conf`
 
 Useful installer overrides:
 
@@ -123,16 +125,17 @@ This updates:
 - `oxygen_monitor.py`
 - `requirements.txt`
 - Python packages in `.venv`
+- `oxygen-monitor.conf.example` with the latest config keys
 - the `systemd` unit
 - the running service via restart
 
 Useful updater overrides:
 
 ```bash
-sudo FRAMEBUFFER=/dev/fb1 ROTATE=90 ./update.sh
-sudo I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./update.sh
-sudo FRAMEBUFFER=none ./update.sh
+sudo ./update.sh
 ```
+
+`update.sh` preserves the existing `oxygen-monitor.conf`. Edit that file directly when you need to change calibration, framebuffer, I2C, or Modbus settings.
 
 If you installed from a copied folder instead of a Git clone, `sudo ./update.sh` still works, but `git pull` inside `/opt/oxygen-monitor` will not.
 
@@ -171,9 +174,28 @@ python3 oxygen_monitor.py --i2c-address 0x73 --modbus-port 5020
 
 ## Modbus Mapping
 
-- Holding register address: `0`
+- Default holding register address: `0`
 - Value format: oxygen percent multiplied by 10
 - Example: `20.9%` is exposed as `209`
+
+You can change Modbus settings without editing Python code by updating `/opt/oxygen-monitor/oxygen-monitor.conf`:
+
+```ini
+MODBUS_HOST=0.0.0.0
+MODBUS_PORT=5020
+MODBUS_REGISTER_ADDRESS=0
+MEASUREMENT_CALIBRATION_FACTOR=0.774
+MAX_VALID_OXYGEN_PERCENT=25.0
+```
+
+Apply config changes with:
+
+```bash
+cd /opt/oxygen-monitor
+sudo ./update.sh
+```
+
+After updates, compare your active config against `/opt/oxygen-monitor/oxygen-monitor.conf.example` if you want to pick up new keys added by the repository.
 
 ## Startup with systemd
 
@@ -189,7 +211,8 @@ Wants=network-online.target
 Type=simple
 User=pi
 WorkingDirectory=/opt/oxygen-monitor
-ExecStart=/opt/oxygen-monitor/.venv/bin/python /opt/oxygen-monitor/oxygen_monitor.py --framebuffer /dev/fb1 --width 480 --height 320
+EnvironmentFile=/opt/oxygen-monitor/oxygen-monitor.conf
+ExecStart=/opt/oxygen-monitor/.venv/bin/python /opt/oxygen-monitor/oxygen_monitor.py
 Restart=always
 RestartSec=3
 StandardOutput=journal

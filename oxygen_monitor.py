@@ -43,7 +43,9 @@ LOG_FORMAT = "%(asctime)s [%(levelname)s] %(threadName)s: %(message)s"
 
 DEFAULT_I2C_BUS = 1
 DEFAULT_I2C_ADDRESS = 0x73
+DEFAULT_MODBUS_HOST = "0.0.0.0"
 DEFAULT_MODBUS_PORT = 5020
+DEFAULT_MODBUS_REGISTER_ADDRESS = 0
 DEFAULT_FB_DEVICE = "/dev/fb1"
 DEFAULT_WIDTH = 480
 DEFAULT_HEIGHT = 320
@@ -74,13 +76,17 @@ COLOR_GRAY = (180, 180, 180)
 class AppConfig:
     i2c_bus: int = DEFAULT_I2C_BUS
     i2c_address: int = DEFAULT_I2C_ADDRESS
+    modbus_host: str = DEFAULT_MODBUS_HOST
     modbus_port: int = DEFAULT_MODBUS_PORT
+    modbus_register_address: int = DEFAULT_MODBUS_REGISTER_ADDRESS
     framebuffer: Optional[str] = DEFAULT_FB_DEVICE
     width: int = DEFAULT_WIDTH
     height: int = DEFAULT_HEIGHT
     rotate: int = 0
     samples: int = 10
     log_level: str = "INFO"
+    measurement_calibration_factor: float = MEASUREMENT_CALIBRATION_FACTOR
+    max_valid_oxygen_percent: float = MAX_VALID_OXYGEN_PERCENT
 
 
 @dataclass
@@ -122,10 +128,19 @@ class SharedState:
 class SEN0322Sensor:
     """Direct SEN0322 reader using the DFRobot I2C register map."""
 
-    def __init__(self, bus_id: int, address: int, samples: int) -> None:
+    def __init__(
+        self,
+        bus_id: int,
+        address: int,
+        samples: int,
+        measurement_calibration_factor: float,
+        max_valid_oxygen_percent: float,
+    ) -> None:
         self.bus_id = bus_id
         self.address = address
         self.samples = max(1, min(samples, 100))
+        self.measurement_calibration_factor = measurement_calibration_factor
+        self.max_valid_oxygen_percent = max_valid_oxygen_percent
         self.history: deque[float] = deque(maxlen=self.samples)
         self._bus_lock = threading.Lock()
         self._bus: Optional[SMBus] = None
@@ -133,8 +148,8 @@ class SEN0322Sensor:
     def read_sensor(self) -> float:
         key = self._read_calibration_key()
         raw = self._read_oxygen_raw()
-        oxygen = key * raw * MEASUREMENT_CALIBRATION_FACTOR
-        if oxygen <= 0 or oxygen > MAX_VALID_OXYGEN_PERCENT:
+        oxygen = key * raw * self.measurement_calibration_factor
+        if oxygen <= 0 or oxygen > self.max_valid_oxygen_percent:
             raise ValueError(f"oxygen reading out of expected range: {oxygen:.2f}%")
         self.history.append(oxygen)
         return sum(self.history) / len(self.history)
@@ -195,18 +210,20 @@ class SEN0322Sensor:
 class ModbusRegisterStore:
     """Thread-safe wrapper around a single holding register."""
 
-    def __init__(self) -> None:
+    def __init__(self, register_address: int = DEFAULT_MODBUS_REGISTER_ADDRESS) -> None:
         self._lock = threading.Lock()
+        self.register_address = max(0, register_address)
         self.slave_context = self._create_device_context()
         self.server_context = self._create_server_context()
 
     def set_oxygen_register(self, oxygen_percent: Optional[float]) -> None:
         scaled_value = 0 if oxygen_percent is None else max(0, int(round(oxygen_percent * 10)))
         with self._lock:
-            self.slave_context.setValues(3, 0, [scaled_value])
+            self.slave_context.setValues(3, self.register_address, [scaled_value])
 
     def _create_device_context(self):
-        kwargs = {"hr": ModbusSequentialDataBlock(0, [0] * 10)}
+        block_size = max(10, self.register_address + 1)
+        kwargs = {"hr": ModbusSequentialDataBlock(0, [0] * block_size)}
         if "zero_mode" in inspect.signature(ModbusDeviceContext.__init__).parameters:
             kwargs["zero_mode"] = True
         try:
@@ -364,10 +381,10 @@ def display_loop(
         sleep_remaining(start, DISPLAY_REFRESH_SECONDS, stop_event)
 
 
-def run_modbus(stop_event: threading.Event, registers: ModbusRegisterStore, port: int) -> None:
-    logging.info("starting Modbus TCP server on port %d", port)
+def run_modbus(stop_event: threading.Event, registers: ModbusRegisterStore, host: str, port: int) -> None:
+    logging.info("starting Modbus TCP server on %s:%d", host, port)
     try:
-        StartTcpServer(context=registers.server_context, address=("0.0.0.0", port))
+        StartTcpServer(context=registers.server_context, address=(host, port))
     except Exception:
         if not stop_event.is_set():
             logging.exception("modbus server stopped unexpectedly")
@@ -386,28 +403,80 @@ def parse_framebuffer(value: str) -> Optional[str]:
     return value
 
 
+def env_or_default(name: str, default):
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return value
+
+
+def parse_int_env(name: str, default: int, base: int = 10) -> int:
+    value = env_or_default(name, None)
+    if value is None:
+        return default
+    return int(value, base)
+
+
+def parse_float_env(name: str, default: float) -> float:
+    value = env_or_default(name, None)
+    if value is None:
+        return default
+    return float(value)
+
+
+def parse_framebuffer_env(name: str, default: Optional[str]) -> Optional[str]:
+    value = env_or_default(name, None)
+    if value is None:
+        return default
+    return parse_framebuffer(value)
+
+
 def parse_args() -> AppConfig:
     parser = argparse.ArgumentParser(description="Raspberry Pi oxygen monitor")
-    parser.add_argument("--i2c-bus", type=int, default=DEFAULT_I2C_BUS)
-    parser.add_argument("--i2c-address", type=lambda x: int(x, 0), default=DEFAULT_I2C_ADDRESS)
-    parser.add_argument("--modbus-port", type=int, default=DEFAULT_MODBUS_PORT)
-    parser.add_argument("--framebuffer", type=parse_framebuffer, default=DEFAULT_FB_DEVICE)
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
-    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
-    parser.add_argument("--rotate", type=int, default=0, choices=[0, 90, 180, 270])
-    parser.add_argument("--samples", type=int, default=10)
-    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--i2c-bus", type=int, default=parse_int_env("I2C_BUS", DEFAULT_I2C_BUS))
+    parser.add_argument(
+        "--i2c-address",
+        type=lambda x: int(x, 0),
+        default=parse_int_env("I2C_ADDRESS", DEFAULT_I2C_ADDRESS, 0),
+    )
+    parser.add_argument("--modbus-host", default=env_or_default("MODBUS_HOST", DEFAULT_MODBUS_HOST))
+    parser.add_argument("--modbus-port", type=int, default=parse_int_env("MODBUS_PORT", DEFAULT_MODBUS_PORT))
+    parser.add_argument(
+        "--modbus-register-address",
+        type=int,
+        default=parse_int_env("MODBUS_REGISTER_ADDRESS", DEFAULT_MODBUS_REGISTER_ADDRESS),
+    )
+    parser.add_argument("--framebuffer", type=parse_framebuffer, default=parse_framebuffer_env("FRAMEBUFFER", DEFAULT_FB_DEVICE))
+    parser.add_argument("--width", type=int, default=parse_int_env("WIDTH", DEFAULT_WIDTH))
+    parser.add_argument("--height", type=int, default=parse_int_env("HEIGHT", DEFAULT_HEIGHT))
+    parser.add_argument("--rotate", type=int, default=parse_int_env("ROTATE", 0), choices=[0, 90, 180, 270])
+    parser.add_argument("--samples", type=int, default=parse_int_env("SAMPLES", 10))
+    parser.add_argument("--log-level", default=env_or_default("LOG_LEVEL", "INFO"), choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument(
+        "--measurement-calibration-factor",
+        type=float,
+        default=parse_float_env("MEASUREMENT_CALIBRATION_FACTOR", MEASUREMENT_CALIBRATION_FACTOR),
+    )
+    parser.add_argument(
+        "--max-valid-oxygen-percent",
+        type=float,
+        default=parse_float_env("MAX_VALID_OXYGEN_PERCENT", MAX_VALID_OXYGEN_PERCENT),
+    )
     args = parser.parse_args()
     return AppConfig(
         i2c_bus=args.i2c_bus,
         i2c_address=args.i2c_address,
+        modbus_host=args.modbus_host,
         modbus_port=args.modbus_port,
+        modbus_register_address=args.modbus_register_address,
         framebuffer=args.framebuffer,
         width=args.width,
         height=args.height,
         rotate=args.rotate,
         samples=args.samples,
         log_level=args.log_level,
+        measurement_calibration_factor=args.measurement_calibration_factor,
+        max_valid_oxygen_percent=args.max_valid_oxygen_percent,
     )
 
 
@@ -417,8 +486,14 @@ def main() -> int:
 
     stop_event = threading.Event()
     state = SharedState()
-    sensor = SEN0322Sensor(config.i2c_bus, config.i2c_address, config.samples)
-    registers = ModbusRegisterStore()
+    sensor = SEN0322Sensor(
+        config.i2c_bus,
+        config.i2c_address,
+        config.samples,
+        config.measurement_calibration_factor,
+        config.max_valid_oxygen_percent,
+    )
+    registers = ModbusRegisterStore(config.modbus_register_address)
     display = None
     if config.framebuffer:
         display = FramebufferDisplay(config.framebuffer, config.width, config.height, config.rotate)
@@ -445,7 +520,7 @@ def main() -> int:
         threading.Thread(
             target=run_modbus,
             name="modbus-thread",
-            args=(stop_event, registers, config.modbus_port),
+            args=(stop_event, registers, config.modbus_host, config.modbus_port),
             daemon=True,
         ),
     ]
