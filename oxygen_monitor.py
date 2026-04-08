@@ -49,10 +49,13 @@ DEFAULT_WIDTH = 480
 DEFAULT_HEIGHT = 320
 SENSOR_POLL_SECONDS = 1.0
 DISPLAY_REFRESH_SECONDS = 1.0
+I2C_RETRY_COUNT = 3
+I2C_RETRY_DELAY_SECONDS = 0.2
 
 OXYGEN_DATA_REGISTER = 0x03
 GET_KEY_REGISTER = 0x0A
 DEFAULT_KEY = 20.9 / 120.0
+MAX_VALID_OXYGEN_PERCENT = 25.0
 
 STATUS_NORMAL = "NORMAL"
 STATUS_LOW = "LOW"
@@ -130,6 +133,8 @@ class SEN0322Sensor:
         key = self._read_calibration_key()
         raw = self._read_oxygen_raw()
         oxygen = key * raw
+        if oxygen <= 0 or oxygen > MAX_VALID_OXYGEN_PERCENT:
+            raise ValueError(f"oxygen reading out of expected range: {oxygen:.2f}%")
         self.history.append(oxygen)
         return sum(self.history) / len(self.history)
 
@@ -143,8 +148,7 @@ class SEN0322Sensor:
         self.close()
 
     def _read_oxygen_raw(self) -> float:
-        with self._bus_lock:
-            raw_bytes = self._get_bus().read_i2c_block_data(self.address, OXYGEN_DATA_REGISTER, 3)
+        raw_bytes = self._read_i2c_block(OXYGEN_DATA_REGISTER, 3)
         if len(raw_bytes) != 3:
             raise IOError(f"expected 3 oxygen bytes, got {len(raw_bytes)}")
 
@@ -154,11 +158,32 @@ class SEN0322Sensor:
         return raw_value
 
     def _read_calibration_key(self) -> float:
-        with self._bus_lock:
-            key_byte = self._get_bus().read_i2c_block_data(self.address, GET_KEY_REGISTER, 1)[0]
+        key_byte = self._read_i2c_block(GET_KEY_REGISTER, 1)[0]
         if key_byte == 0:
             return DEFAULT_KEY
         return key_byte / 1000.0
+
+    def _read_i2c_block(self, register: int, length: int) -> list[int]:
+        last_error: Optional[Exception] = None
+        for attempt in range(1, I2C_RETRY_COUNT + 1):
+            try:
+                with self._bus_lock:
+                    return self._get_bus().read_i2c_block_data(self.address, register, length)
+            except OSError as exc:
+                last_error = exc
+                self.reset_bus()
+                if attempt < I2C_RETRY_COUNT:
+                    logging.warning(
+                        "i2c read failed on register 0x%02X (attempt %d/%d): %s",
+                        register,
+                        attempt,
+                        I2C_RETRY_COUNT,
+                        exc,
+                    )
+                    time.sleep(I2C_RETRY_DELAY_SECONDS)
+        if last_error is None:
+            raise IOError(f"failed to read register 0x{register:02X}")
+        raise IOError(f"failed to read register 0x{register:02X} after {I2C_RETRY_COUNT} attempts: {last_error}")
 
     def _get_bus(self) -> SMBus:
         if self._bus is None:
