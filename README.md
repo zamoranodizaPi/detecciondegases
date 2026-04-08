@@ -12,6 +12,8 @@ The main application file is `oxygen_monitor.py`.
 
 - `oxygen_monitor.py`: main application
 - `requirements.txt`: Python dependencies
+- `install.sh`: automated installer for Raspberry Pi
+- `oxygen-monitor.service`: systemd service template
 
 ## Hardware Notes
 
@@ -63,7 +65,24 @@ If `/dev/fb1` does not exist yet, install and configure the correct SPI TFT driv
 
 ## Installation
 
-System packages:
+Quick install on Raspberry Pi:
+
+```bash
+cd /home/pi/detecciondegases
+chmod +x install.sh
+sudo ./install.sh
+```
+
+The installer copies the app to `/opt/oxygen-monitor`, creates a virtual environment, installs dependencies, writes the `systemd` service, enables it, and starts it.
+
+Useful installer overrides:
+
+```bash
+sudo APP_USER=pi INSTALL_DIR=/opt/oxygen-monitor FRAMEBUFFER=/dev/fb1 WIDTH=480 HEIGHT=320 ROTATE=0 ./install.sh
+sudo APP_USER=pi I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./install.sh
+```
+
+Manual package installation:
 
 ```bash
 sudo apt update
@@ -104,7 +123,7 @@ python3 oxygen_monitor.py --i2c-address 0x73 --modbus-port 5020
 
 ## Startup with systemd
 
-Create `/etc/systemd/system/oxygen-monitor.service`:
+Template file included in the repository:
 
 ```ini
 [Unit]
@@ -126,9 +145,10 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-Enable and start it:
+If you use `install.sh`, this is done automatically. For manual setup, copy and enable it:
 
 ```bash
+sudo cp oxygen-monitor.service /etc/systemd/system/oxygen-monitor.service
 sudo systemctl daemon-reload
 sudo systemctl enable oxygen-monitor.service
 sudo systemctl start oxygen-monitor.service

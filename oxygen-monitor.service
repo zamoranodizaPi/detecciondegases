@@ -1,0 +1,18 @@
+[Unit]
+Description=Raspberry Pi Oxygen Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP_USER__
+Group=__APP_GROUP__
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/.venv/bin/python __INSTALL_DIR__/oxygen_monitor.py --framebuffer __FRAMEBUFFER__ --width __WIDTH__ --height __HEIGHT__ --rotate __ROTATE__ --i2c-bus __I2C_BUS__ --i2c-address __I2C_ADDRESS__ --modbus-port __MODBUS_PORT__
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
