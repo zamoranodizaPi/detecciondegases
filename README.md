@@ -13,6 +13,7 @@ The main application file is `oxygen_monitor.py`.
 - `oxygen_monitor.py`: main application
 - `requirements.txt`: Python dependencies
 - `install.sh`: automated installer for Raspberry Pi
+- `update.sh`: update script for code and dependencies
 - `oxygen-monitor.service`: systemd service template
 
 ## Hardware Notes
@@ -41,6 +42,8 @@ Reboot after enabling them:
 ```bash
 sudo reboot
 ```
+
+`install.sh` also tries to enable `I2C` and `SPI` automatically using `raspi-config nonint` when available.
 
 ## Verify Devices
 
@@ -73,13 +76,54 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
-The installer copies the app to `/opt/oxygen-monitor`, creates a virtual environment, installs dependencies, writes the `systemd` service, enables it, and starts it.
+The installer:
+
+- installs OS packages
+- enables `I2C` and `SPI` automatically when possible
+- adds the runtime user to `i2c`, `spi`, and `video`
+- copies the app to `/opt/oxygen-monitor`
+- creates the virtual environment
+- installs dependencies
+- writes the `systemd` service
+- enables and starts the service
 
 Useful installer overrides:
 
 ```bash
 sudo APP_USER=pi INSTALL_DIR=/opt/oxygen-monitor FRAMEBUFFER=/dev/fb1 WIDTH=480 HEIGHT=320 ROTATE=0 ./install.sh
 sudo APP_USER=pi I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./install.sh
+sudo ENABLE_INTERFACES=0 ./install.sh
+```
+
+If this is the first time you enabled `I2C` or `SPI`, reboot after installation:
+
+```bash
+sudo reboot
+```
+
+## Update Existing Installation
+
+For later code changes, use:
+
+```bash
+cd /home/pi/detecciondegases
+chmod +x update.sh
+sudo ./update.sh
+```
+
+This updates:
+
+- `oxygen_monitor.py`
+- `requirements.txt`
+- Python packages in `.venv`
+- the `systemd` unit
+- the running service via restart
+
+Useful updater overrides:
+
+```bash
+sudo FRAMEBUFFER=/dev/fb1 ROTATE=90 ./update.sh
+sudo I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./update.sh
 ```
 
 Manual package installation:
