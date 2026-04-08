@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import inspect
 import logging
 import os
 import signal
@@ -29,7 +30,11 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
-from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext, ModbusSlaveContext
+from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
+try:
+    from pymodbus.datastore import ModbusSlaveContext as ModbusDeviceContext
+except ImportError:
+    from pymodbus.datastore import ModbusDeviceContext
 from pymodbus.server import StartTcpServer
 from smbus2 import SMBus
 
@@ -166,16 +171,28 @@ class ModbusRegisterStore:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self.slave_context = ModbusSlaveContext(
-            hr=ModbusSequentialDataBlock(0, [0] * 10),
-            zero_mode=True,
-        )
-        self.server_context = ModbusServerContext(slaves=self.slave_context, single=True)
+        self.slave_context = self._create_device_context()
+        self.server_context = self._create_server_context()
 
     def set_oxygen_register(self, oxygen_percent: Optional[float]) -> None:
         scaled_value = 0 if oxygen_percent is None else max(0, int(round(oxygen_percent * 10)))
         with self._lock:
             self.slave_context.setValues(3, 0, [scaled_value])
+
+    def _create_device_context(self):
+        kwargs = {"hr": ModbusSequentialDataBlock(0, [0] * 10)}
+        if "zero_mode" in inspect.signature(ModbusDeviceContext.__init__).parameters:
+            kwargs["zero_mode"] = True
+        return ModbusDeviceContext(**kwargs)
+
+    def _create_server_context(self):
+        kwargs = {"single": True}
+        parameters = inspect.signature(ModbusServerContext.__init__).parameters
+        if "slaves" in parameters:
+            kwargs["slaves"] = self.slave_context
+        else:
+            kwargs["devices"] = self.slave_context
+        return ModbusServerContext(**kwargs)
 
 
 class FramebufferDisplay:

@@ -130,7 +130,7 @@ Manual package installation:
 
 ```bash
 sudo apt update
-sudo apt install -y python3-pip python3-venv python3-dev libjpeg-dev zlib1g-dev
+sudo apt install -y python3-pip python3-venv python3-dev libjpeg-dev libopenjp2-7 zlib1g-dev
 ```
 
 Create a virtual environment:

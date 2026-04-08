@@ -49,6 +49,7 @@ apt-get install -y \
   python3-pip \
   python3-dev \
   libjpeg-dev \
+  libopenjp2-7 \
   zlib1g-dev \
   i2c-tools \
   python3-smbus
