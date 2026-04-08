@@ -71,7 +71,7 @@ class AppConfig:
     i2c_bus: int = DEFAULT_I2C_BUS
     i2c_address: int = DEFAULT_I2C_ADDRESS
     modbus_port: int = DEFAULT_MODBUS_PORT
-    framebuffer: str = DEFAULT_FB_DEVICE
+    framebuffer: Optional[str] = DEFAULT_FB_DEVICE
     width: int = DEFAULT_WIDTH
     height: int = DEFAULT_HEIGHT
     rotate: int = 0
@@ -353,12 +353,19 @@ def sleep_remaining(start_time: float, interval: float, stop_event: threading.Ev
     stop_event.wait(remaining)
 
 
+def parse_framebuffer(value: str) -> Optional[str]:
+    normalized = value.strip().lower()
+    if normalized in {"", "none", "off", "disabled", "disable", "no"}:
+        return None
+    return value
+
+
 def parse_args() -> AppConfig:
     parser = argparse.ArgumentParser(description="Raspberry Pi oxygen monitor")
     parser.add_argument("--i2c-bus", type=int, default=DEFAULT_I2C_BUS)
     parser.add_argument("--i2c-address", type=lambda x: int(x, 0), default=DEFAULT_I2C_ADDRESS)
     parser.add_argument("--modbus-port", type=int, default=DEFAULT_MODBUS_PORT)
-    parser.add_argument("--framebuffer", default=DEFAULT_FB_DEVICE)
+    parser.add_argument("--framebuffer", type=parse_framebuffer, default=DEFAULT_FB_DEVICE)
     parser.add_argument("--width", type=int, default=DEFAULT_WIDTH)
     parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT)
     parser.add_argument("--rotate", type=int, default=0, choices=[0, 90, 180, 270])
@@ -386,9 +393,14 @@ def main() -> int:
     state = SharedState()
     sensor = SEN0322Sensor(config.i2c_bus, config.i2c_address, config.samples)
     registers = ModbusRegisterStore()
-    display = FramebufferDisplay(config.framebuffer, config.width, config.height, config.rotate)
+    display = None
+    if config.framebuffer:
+        display = FramebufferDisplay(config.framebuffer, config.width, config.height, config.rotate)
+    else:
+        logging.info("framebuffer disabled; display thread will not start")
     atexit.register(sensor.close)
-    atexit.register(display.close)
+    if display is not None:
+        atexit.register(display.close)
 
     def handle_signal(signum: int, _frame: object) -> None:
         logging.info("received signal %s, shutting down", signum)
@@ -410,13 +422,17 @@ def main() -> int:
             args=(stop_event, registers, config.modbus_port),
             daemon=True,
         ),
-        threading.Thread(
-            target=display_loop,
-            name="display-thread",
-            args=(stop_event, state, display),
-            daemon=True,
-        ),
     ]
+
+    if display is not None:
+        threads.append(
+            threading.Thread(
+                target=display_loop,
+                name="display-thread",
+                args=(stop_event, state, display),
+                daemon=True,
+            )
+        )
 
     for thread in threads:
         thread.start()
@@ -432,7 +448,8 @@ def main() -> int:
             thread.join(timeout=2.0)
 
     sensor.close()
-    display.close()
+    if display is not None:
+        display.close()
     logging.info("oxygen monitor stopped")
     return 0
 

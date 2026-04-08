@@ -99,6 +99,7 @@ Useful installer overrides:
 sudo APP_USER=pi INSTALL_DIR=/opt/oxygen-monitor FRAMEBUFFER=/dev/fb1 WIDTH=480 HEIGHT=320 ROTATE=0 ./install.sh
 sudo APP_USER=pi I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./install.sh
 sudo ENABLE_INTERFACES=0 ./install.sh
+sudo FRAMEBUFFER=none ./install.sh
 ```
 
 If this is the first time you enabled `I2C` or `SPI`, reboot after installation:
@@ -130,6 +131,7 @@ Useful updater overrides:
 ```bash
 sudo FRAMEBUFFER=/dev/fb1 ROTATE=90 ./update.sh
 sudo I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./update.sh
+sudo FRAMEBUFFER=none ./update.sh
 ```
 
 If you installed from a copied folder instead of a Git clone, `sudo ./update.sh` still works, but `git pull` inside `/opt/oxygen-monitor` will not.
