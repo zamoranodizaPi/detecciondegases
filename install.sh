@@ -18,6 +18,16 @@ MODBUS_PORT="${MODBUS_PORT:-5020}"
 ENABLE_INTERFACES="${ENABLE_INTERFACES:-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_IS_GIT_REPO=0
+TARGET_IS_GIT_REPO=0
+
+if git -C "${SCRIPT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  SOURCE_IS_GIT_REPO=1
+fi
+
+if [[ -d "${INSTALL_DIR}" ]] && git -C "${INSTALL_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  TARGET_IS_GIT_REPO=1
+fi
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run this installer with sudo."
@@ -40,6 +50,20 @@ require_file() {
 require_file "${SCRIPT_DIR}/oxygen_monitor.py"
 require_file "${SCRIPT_DIR}/requirements.txt"
 require_file "${SCRIPT_DIR}/oxygen-monitor.service"
+
+if [[ "${SOURCE_IS_GIT_REPO}" -eq 0 ]]; then
+  echo "Warning: ${SCRIPT_DIR} is not a Git clone."
+  echo "Future 'git pull' updates will not work unless you install from a cloned repository."
+fi
+
+if [[ "${SOURCE_IS_GIT_REPO}" -eq 1 && "${TARGET_IS_GIT_REPO}" -eq 0 && "${SCRIPT_DIR}" != "${INSTALL_DIR}" ]]; then
+  echo "Warning: files will be copied into ${INSTALL_DIR}, but that directory is not a Git clone."
+  echo "Recommended deployment:"
+  echo "  sudo git clone https://github.com/zamoranodizaPi/detecciondegases.git ${INSTALL_DIR}"
+  echo "  cd ${INSTALL_DIR}"
+  echo "  sudo ./install.sh"
+  echo
+fi
 
 echo "[1/10] Installing OS packages..."
 apt-get update

@@ -68,20 +68,26 @@ If `/dev/fb1` does not exist yet, install and configure the correct SPI TFT driv
 
 ## Installation
 
-Quick install on Raspberry Pi:
+Recommended install on Raspberry Pi:
 
 ```bash
-cd /home/pi/detecciondegases
-chmod +x install.sh
+cd /opt
+sudo rm -rf oxygen-monitor
+sudo git clone https://github.com/zamoranodizaPi/detecciondegases.git oxygen-monitor
+cd /opt/oxygen-monitor
 sudo ./install.sh
 ```
+
+This keeps `/opt/oxygen-monitor` as a real Git repository, so future updates can use `git pull`.
+
+If you prefer to clone elsewhere and still install into `/opt/oxygen-monitor`, that also works, but `/opt/oxygen-monitor` itself will not be a Git checkout unless you clone there directly.
 
 The installer:
 
 - installs OS packages
 - enables `I2C` and `SPI` automatically when possible
 - adds the runtime user to `i2c`, `spi`, and `video`
-- copies the app to `/opt/oxygen-monitor`
+- installs the app into `/opt/oxygen-monitor`
 - creates the virtual environment
 - installs dependencies
 - writes the `systemd` service
@@ -103,11 +109,11 @@ sudo reboot
 
 ## Update Existing Installation
 
-For later code changes, use:
+For later code changes on a Git-based install, use:
 
 ```bash
-cd /home/pi/detecciondegases
-chmod +x update.sh
+cd /opt/oxygen-monitor
+git pull origin main
 sudo ./update.sh
 ```
 
@@ -126,6 +132,8 @@ sudo FRAMEBUFFER=/dev/fb1 ROTATE=90 ./update.sh
 sudo I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./update.sh
 ```
 
+If you installed from a copied folder instead of a Git clone, `sudo ./update.sh` still works, but `git pull` inside `/opt/oxygen-monitor` will not.
+
 Manual package installation:
 
 ```bash
@@ -136,8 +144,8 @@ sudo apt install -y python3-pip python3-venv python3-dev libjpeg-dev libopenjp2-
 Create a virtual environment:
 
 ```bash
-mkdir -p /home/pi/oxygen-monitor
-cd /home/pi/oxygen-monitor
+mkdir -p /opt/oxygen-monitor
+cd /opt/oxygen-monitor
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
@@ -147,7 +155,7 @@ pip install -r requirements.txt
 ## Run Manually
 
 ```bash
-cd /home/pi/oxygen-monitor
+cd /opt/oxygen-monitor
 source .venv/bin/activate
 python3 oxygen_monitor.py
 ```
@@ -178,8 +186,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/oxygen-monitor
-ExecStart=/home/pi/oxygen-monitor/.venv/bin/python /home/pi/oxygen-monitor/oxygen_monitor.py --framebuffer /dev/fb1 --width 480 --height 320
+WorkingDirectory=/opt/oxygen-monitor
+ExecStart=/opt/oxygen-monitor/.venv/bin/python /opt/oxygen-monitor/oxygen_monitor.py --framebuffer /dev/fb1 --width 480 --height 320
 Restart=always
 RestartSec=3
 StandardOutput=journal
