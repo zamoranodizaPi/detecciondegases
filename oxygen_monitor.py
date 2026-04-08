@@ -55,6 +55,7 @@ I2C_RETRY_DELAY_SECONDS = 0.2
 OXYGEN_DATA_REGISTER = 0x03
 GET_KEY_REGISTER = 0x0A
 DEFAULT_KEY = 20.9 / 120.0
+MEASUREMENT_CALIBRATION_FACTOR = 0.774
 MAX_VALID_OXYGEN_PERCENT = 25.0
 
 STATUS_NORMAL = "NORMAL"
@@ -132,7 +133,7 @@ class SEN0322Sensor:
     def read_sensor(self) -> float:
         key = self._read_calibration_key()
         raw = self._read_oxygen_raw()
-        oxygen = key * raw
+        oxygen = key * raw * MEASUREMENT_CALIBRATION_FACTOR
         if oxygen <= 0 or oxygen > MAX_VALID_OXYGEN_PERCENT:
             raise ValueError(f"oxygen reading out of expected range: {oxygen:.2f}%")
         self.history.append(oxygen)
