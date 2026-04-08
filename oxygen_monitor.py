@@ -32,9 +32,9 @@ from typing import Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
 try:
-    from pymodbus.datastore import ModbusSlaveContext as ModbusDeviceContext
-except ImportError:
     from pymodbus.datastore import ModbusDeviceContext
+except ImportError:
+    from pymodbus.datastore import ModbusSlaveContext as ModbusDeviceContext
 from pymodbus.server import StartTcpServer
 from smbus2 import SMBus
 
@@ -183,7 +183,13 @@ class ModbusRegisterStore:
         kwargs = {"hr": ModbusSequentialDataBlock(0, [0] * 10)}
         if "zero_mode" in inspect.signature(ModbusDeviceContext.__init__).parameters:
             kwargs["zero_mode"] = True
-        return ModbusDeviceContext(**kwargs)
+        try:
+            return ModbusDeviceContext(**kwargs)
+        except TypeError as exc:
+            if "zero_mode" not in kwargs or "zero_mode" not in str(exc):
+                raise
+            kwargs.pop("zero_mode", None)
+            return ModbusDeviceContext(**kwargs)
 
     def _create_server_context(self):
         kwargs = {"single": True}
