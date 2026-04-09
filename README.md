@@ -1,257 +1,123 @@
-# Raspberry Pi Oxygen Monitor
+# GasMonitor for Raspberry Pi 3
 
-This project provides a single-file Python 3 application for a Raspberry Pi 3 that:
+GasMonitor is a modular gas monitoring service for Raspberry Pi 3 with:
 
-- reads oxygen concentration from a DFRobot Gravity SEN0322 over I2C
-- exposes the value through a Modbus TCP server on port `5020`
-- renders a simple status screen to a framebuffer-backed SPI TFT
+- oxygen sensing through DFRobot SEN0322 over I2C
+- multi-gas support for MICS-6814 through Linux IIO channels
+- Modbus TCP server
+- FastAPI web dashboard for monitoring and configuration
+- framebuffer-driven 3.5 inch SPI display
+- persistent `config.ini`
+- first-run commissioning mode
+- structured rotating logs in `logs/system.log`
 
-The main application file is `oxygen_monitor.py`.
+## Project Structure
 
-## Files
-
-- `oxygen_monitor.py`: main application
-- `requirements.txt`: Python dependencies
-- `install.sh`: automated installer for Raspberry Pi
-- `update.sh`: update script for code and dependencies
-- `oxygen-monitor.conf`: runtime configuration template
-- `oxygen-monitor.service`: systemd service template
-
-## Hardware Notes
-
-- Oxygen sensor: DFRobot Gravity `SEN0322`
-- Default I2C address: `0x73`
-- Display: 3.5 inch ILI9486-compatible SPI TFT configured as a Linux framebuffer, typically `/dev/fb1`
-
-The script assumes the TFT is already working as a framebuffer device. For many Raspberry Pi display driver stacks, that means `/dev/fb1` at `480x320`.
-
-## Enable I2C and SPI
-
-Use `raspi-config`:
-
-```bash
-sudo raspi-config
+```text
+.
+├── main.py
+├── core.py
+├── config.py
+├── shared_state.py
+├── logging_utils.py
+├── auth.py
+├── config.ini
+├── sensors/
+│   ├── oxygen.py
+│   └── mics6814.py
+├── display/
+│   └── display.py
+├── web/
+│   ├── index.html
+│   └── app.js
+├── gasmonitor.service
+├── install.sh
+├── update.sh
+└── requirements.txt
 ```
 
-Then enable:
+## Configuration
 
-1. `Interface Options` -> `I2C` -> `Yes`
-2. `Interface Options` -> `SPI` -> `Yes`
+The service auto-creates `config.ini` if it does not exist. Main sections:
 
-Reboot after enabling them:
+- `[hardware]`: I2C, MICS path, framebuffer, display geometry
+- `[network]`: DHCP/static network profile values
+- `[web]`: dashboard port and credentials
+- `[modbus]`: enable flag and TCP port
+- `[sampling]`: moving-average depth and loop interval
+- `[calibration]`: gas calibration multipliers
+- `[alarms]`: threshold configuration
+- `[system]`: first-run state, device name, log file
 
-```bash
-sudo reboot
-```
+On first boot:
 
-`install.sh` also tries to enable `I2C` and `SPI` automatically using `raspi-config nonint` when available.
+- `first_run = true` keeps the system in configuration mode
+- the display shows the current IP
+- the dashboard forces a password change before first-run can be cleared
 
-## Verify Devices
+## Modbus Register Map
 
-Check that the sensor appears on I2C bus 1:
+- `0`: oxygen percent x10
+- `1`: CO ppm
+- `2`: NO2 ppm x10
+- `3`: NH3 ppm
 
-```bash
-sudo apt update
-sudo apt install -y i2c-tools
-i2cdetect -y 1
-```
+Default Modbus TCP port is `5020`.
 
-You should normally see the SEN0322 at `0x73`.
+## Web API
 
-Check that the display driver created a framebuffer:
+- `POST /login`
+- `GET /api/measurements`
+- `GET /api/config`
+- `POST /api/config`
+- `POST /api/reboot`
 
-```bash
-ls -l /dev/fb*
-fbset -fb /dev/fb1
-```
+The dashboard serves at `/` and static assets are under `/web`.
 
-If `/dev/fb1` does not exist yet, install and configure the correct SPI TFT driver or overlay for your specific 3.5 inch ILI9486-compatible panel first.
-
-## Installation
-
-Recommended install on Raspberry Pi:
+## Install on Raspberry Pi
 
 ```bash
 cd /opt
-sudo rm -rf oxygen-monitor
-sudo git clone https://github.com/zamoranodizaPi/detecciondegases.git oxygen-monitor
-cd /opt/oxygen-monitor
+sudo git clone https://github.com/zamoranodizaPi/detecciondegases.git gasmonitor
+cd /opt/gasmonitor
 sudo ./install.sh
 ```
 
-This keeps `/opt/oxygen-monitor` as a real Git repository, so future updates can use `git pull`.
-
-If you prefer to clone elsewhere and still install into `/opt/oxygen-monitor`, that also works, but `/opt/oxygen-monitor` itself will not be a Git checkout unless you clone there directly.
-
 The installer:
 
-- installs OS packages
-- enables `I2C` and `SPI` automatically when possible
+- installs required OS packages
+- enables I2C and SPI when `raspi-config` is present
 - adds the runtime user to `i2c`, `spi`, and `video`
-- installs the app into `/opt/oxygen-monitor`
-- creates the virtual environment
-- installs dependencies
-- writes the `systemd` service
-- enables and starts the service
-- creates or updates `oxygen-monitor.conf`
+- copies the application to `/opt/gasmonitor`
+- creates `.venv`
+- installs Python dependencies
+- installs `gasmonitor.service`
+- starts the service
 
-Useful installer overrides:
-
-```bash
-sudo APP_USER=pi INSTALL_DIR=/opt/oxygen-monitor FRAMEBUFFER=/dev/fb1 WIDTH=480 HEIGHT=320 ROTATE=0 ./install.sh
-sudo APP_USER=pi I2C_ADDRESS=0x73 MODBUS_PORT=5020 ./install.sh
-sudo ENABLE_INTERFACES=0 ./install.sh
-sudo FRAMEBUFFER=none ./install.sh
-```
-
-If this is the first time you enabled `I2C` or `SPI`, reboot after installation:
+## Manual Run
 
 ```bash
-sudo reboot
-```
-
-## Update Existing Installation
-
-For later code changes on a Git-based install, use:
-
-```bash
-cd /opt/oxygen-monitor
-git pull origin main
-sudo ./update.sh
-```
-
-This updates:
-
-- `oxygen_monitor.py`
-- `requirements.txt`
-- Python packages in `.venv`
-- `oxygen-monitor.conf.example` with the latest config keys
-- the `systemd` unit
-- the running service via restart
-
-Useful updater overrides:
-
-```bash
-sudo ./update.sh
-```
-
-`update.sh` preserves the existing `oxygen-monitor.conf`. Edit that file directly when you need to change calibration, framebuffer, I2C, or Modbus settings.
-
-If you installed from a copied folder instead of a Git clone, `sudo ./update.sh` still works, but `git pull` inside `/opt/oxygen-monitor` will not.
-
-Manual package installation:
-
-```bash
-sudo apt update
-sudo apt install -y python3-pip python3-venv python3-dev libjpeg-dev libopenjp2-7 zlib1g-dev
-```
-
-Create a virtual environment:
-
-```bash
-mkdir -p /opt/oxygen-monitor
-cd /opt/oxygen-monitor
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
+python3 main.py --config config.ini
 ```
 
-## Run Manually
+## Hardware Notes
+
+- SEN0322 oxygen sensor defaults to I2C address `0x73`
+- MICS-6814 input is implemented against Linux IIO files at `/sys/bus/iio/devices/iio:device0`
+- the SPI TFT must already be exposed as a framebuffer such as `/dev/fb1`
+
+If your MICS board exposes channels differently, update `sensors/mics6814.py` or point `mics_path` to the correct IIO device.
+
+## Logs and Service
+
+Logs are written to `logs/system.log` and to `journald`.
+
+Useful commands:
 
 ```bash
-cd /opt/oxygen-monitor
-source .venv/bin/activate
-python3 oxygen_monitor.py
+sudo systemctl status gasmonitor.service
+sudo journalctl -u gasmonitor.service -f
 ```
-
-Useful options:
-
-```bash
-python3 oxygen_monitor.py --framebuffer /dev/fb1 --width 480 --height 320 --rotate 0
-python3 oxygen_monitor.py --i2c-address 0x73 --modbus-port 5020
-```
-
-## Modbus Mapping
-
-- Default holding register address: `0`
-- Value format: oxygen percent multiplied by 10
-- Example: `20.9%` is exposed as `209`
-
-You can change Modbus settings without editing Python code by updating `/opt/oxygen-monitor/oxygen-monitor.conf`:
-
-```ini
-MODBUS_HOST=0.0.0.0
-MODBUS_PORT=5020
-MODBUS_REGISTER_ADDRESS=0
-MEASUREMENT_CALIBRATION_FACTOR=0.774
-MAX_VALID_OXYGEN_PERCENT=25.0
-```
-
-Apply config changes with:
-
-```bash
-cd /opt/oxygen-monitor
-sudo ./update.sh
-```
-
-After updates, compare your active config against `/opt/oxygen-monitor/oxygen-monitor.conf.example` if you want to pick up new keys added by the repository.
-
-## Startup with systemd
-
-Template file included in the repository:
-
-```ini
-[Unit]
-Description=Raspberry Pi Oxygen Monitor
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/opt/oxygen-monitor
-EnvironmentFile=/opt/oxygen-monitor/oxygen-monitor.conf
-ExecStart=/opt/oxygen-monitor/.venv/bin/python /opt/oxygen-monitor/oxygen_monitor.py
-Restart=always
-RestartSec=3
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-If you use `install.sh`, this is done automatically. For manual setup, copy and enable it:
-
-```bash
-sudo cp oxygen-monitor.service /etc/systemd/system/oxygen-monitor.service
-sudo systemctl daemon-reload
-sudo systemctl enable oxygen-monitor.service
-sudo systemctl start oxygen-monitor.service
-```
-
-Check logs:
-
-```bash
-sudo journalctl -u oxygen-monitor.service -f
-```
-
-## Behavior
-
-- Sensor thread reads oxygen every second
-- Modbus thread serves holding registers over TCP
-- Display thread redraws the screen every second
-- Sensor failures are logged and shown on screen without crashing the process
-
-## Display Colors
-
-- Black background
-- Green text for `NORMAL`
-- Red text for `LOW`, `HIGH`, or sensor fault
-
-## Notes
-
-- The SEN0322 needs time to stabilize after power-up.
-- If the sensor is disconnected, the Modbus holding register is set to `0` until readings recover.
-- If your display orientation is wrong, change `--rotate` to `90`, `180`, or `270`.

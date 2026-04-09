@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GasMonitor</title>
+  <style>
+    :root {
+      --bg: #0f1720;
+      --panel: #16222d;
+      --accent: #4ade80;
+      --warn: #f59e0b;
+      --alarm: #ef4444;
+      --text: #e5eef5;
+      --muted: #9db0c2;
+    }
+    body {
+      margin: 0;
+      font-family: "DejaVu Sans", sans-serif;
+      background: radial-gradient(circle at top, #1b2937, var(--bg));
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .panel {
+      background: rgba(22, 34, 45, 0.95);
+      border: 1px solid rgba(157, 176, 194, 0.15);
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .value {
+      font-size: 2rem;
+      font-weight: 700;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    input, select, button {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 6px;
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(157, 176, 194, 0.2);
+      background: #0d141b;
+      color: var(--text);
+    }
+    button {
+      background: linear-gradient(135deg, #1f7a48, #155e75);
+      cursor: pointer;
+      border: none;
+    }
+    .status-normal { color: var(--accent); }
+    .status-alarm { color: var(--alarm); }
+    .status-fault { color: var(--warn); }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="loginPanel" class="panel">
+      <h2>GasMonitor Login</h2>
+      <label>Username <input id="username" value="admin"></label>
+      <label>Password <input id="password" type="password" value="admin"></label>
+      <button id="loginBtn">Login</button>
+      <div id="loginMessage" class="muted"></div>
+    </div>
+
+    <div id="appPanel" class="hidden">
+      <div class="panel">
+        <h2>Live Monitoring</h2>
+        <div id="statusText" class="value">BOOT</div>
+        <div id="metaText" class="muted"></div>
+        <div class="grid">
+          <div class="panel"><div class="muted">Oxygen</div><div id="oxygenValue" class="value">--</div></div>
+          <div class="panel"><div class="muted">CO</div><div id="coValue" class="value">--</div></div>
+          <div class="panel"><div class="muted">NO2</div><div id="no2Value" class="value">--</div></div>
+          <div class="panel"><div class="muted">NH3</div><div id="nh3Value" class="value">--</div></div>
+        </div>
+        <div id="alarmText" class="muted"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Configuration</h2>
+        <div id="configMessage" class="muted"></div>
+        <label>Device Name <input id="deviceName"></label>
+        <label>Web Port <input id="webPort" type="number"></label>
+        <label>Network Mode
+          <select id="networkMode">
+            <option value="dhcp">DHCP</option>
+            <option value="static">Static</option>
+          </select>
+        </label>
+        <label>Static IP <input id="staticIp"></label>
+        <label>Gateway <input id="gateway"></label>
+        <label>DNS <input id="dns"></label>
+        <label>Low Oxygen Alarm <input id="oxygenLow" type="number" step="0.1"></label>
+        <label>High Oxygen Alarm <input id="oxygenHigh" type="number" step="0.1"></label>
+        <label>CO Alarm <input id="coHigh" type="number" step="1"></label>
+        <label>New Password <input id="newPassword" type="password" placeholder="Leave blank to keep current"></label>
+        <button id="saveConfigBtn">Save Configuration</button>
+        <button id="rebootBtn">Reboot Device</button>
+      </div>
+    </div>
+  </div>
+  <script src="/web/app.js"></script>
+</body>
+</html>

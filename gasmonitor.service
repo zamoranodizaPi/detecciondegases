@@ -1,5 +1,5 @@
 [Unit]
-Description=Raspberry Pi Oxygen Monitor
+Description=Industrial Gas Monitoring Service
 After=network-online.target
 Wants=network-online.target
 
@@ -8,8 +8,7 @@ Type=simple
 User=__APP_USER__
 Group=__APP_GROUP__
 WorkingDirectory=__INSTALL_DIR__
-EnvironmentFile=__INSTALL_DIR__/oxygen-monitor.conf
-ExecStart=__INSTALL_DIR__/.venv/bin/python __INSTALL_DIR__/oxygen_monitor.py
+ExecStart=__INSTALL_DIR__/.venv/bin/python __INSTALL_DIR__/main.py --config __INSTALL_DIR__/config.ini
 Restart=always
 RestartSec=3
 StandardOutput=journal
