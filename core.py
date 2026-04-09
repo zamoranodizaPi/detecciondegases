@@ -4,6 +4,7 @@ import logging
 import socket
 import threading
 import time
+from collections import defaultdict
 
 from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
 try:
@@ -47,6 +48,30 @@ class ModbusBridge:
         StartTcpServer(context=self._context, address=("0.0.0.0", port))
 
 
+class MeasurementWindow:
+    def __init__(self, publish_window: float) -> None:
+        self._samples: dict[str, list[float]] = defaultdict(list)
+        self.publish_window = publish_window
+        self._last_published = time.monotonic()
+
+    def add_sample(self, gas: str, value: float | None) -> None:
+        if value is None:
+            return
+        self._samples[gas].append(value)
+
+    def ready(self) -> bool:
+        return (time.monotonic() - self._last_published) >= self.publish_window
+
+    def publish(self, fallback: dict[str, float | None]) -> dict[str, float | None]:
+        published: dict[str, float | None] = dict(fallback)
+        for gas, values in self._samples.items():
+            if values:
+                published[gas] = round(sum(values) / len(values), 2)
+        self._samples.clear()
+        self._last_published = time.monotonic()
+        return published
+
+
 class GasMonitorCore:
     def __init__(self, config_manager: ConfigManager) -> None:
         self.config_manager = config_manager
@@ -62,6 +87,13 @@ class GasMonitorCore:
         self.display = self._build_display(self.runtime)
         self.oxygen_sensor = self._build_oxygen_sensor(self.runtime)
         self.mics_sensor = self._build_mics_sensor(self.runtime)
+        self.measurement_window = MeasurementWindow(self.runtime.publish_window)
+        self.last_stable_measurements: dict[str, float | None] = {
+            "oxygen": None,
+            "co": None,
+            "no2": None,
+            "nh3": None,
+        }
 
     def run(self) -> None:
         self._start_thread("sensor-loop", self._sensor_loop)
@@ -88,24 +120,27 @@ class GasMonitorCore:
             self.state.refresh_config(runtime)
             self.state.set_ip_address(self._get_ip_address())
 
-            measurements: dict[str, float | None] = {"oxygen": None, "co": None, "no2": None, "nh3": None}
+            measurements: dict[str, float | None] = {}
             try:
                 measurements.update(self.oxygen_sensor.read())
-                self.state.clear_sensor_fault("oxygen")
             except Exception as exc:
-                LOGGER.exception("oxygen sensor read failed")
-                self.state.set_sensor_fault("oxygen", str(exc))
+                LOGGER.warning("oxygen sensor read ignored: %s", exc)
 
             if self.mics_sensor is not None:
                 try:
                     measurements.update(self.mics_sensor.read())
-                    self.state.clear_sensor_fault("mics6814")
                 except Exception as exc:
-                    LOGGER.exception("mics6814 read failed")
-                    self.state.set_sensor_fault("mics6814", str(exc))
+                    LOGGER.warning("mics6814 read ignored: %s", exc)
 
-            self.state.update_measurements(measurements)
-            self.modbus.update(self.state.snapshot()["measurements"])
+            filtered = self._filter_measurements(measurements)
+            for gas, value in filtered.items():
+                self.measurement_window.add_sample(gas, value)
+
+            if self.measurement_window.ready():
+                published = self.measurement_window.publish(self.last_stable_measurements)
+                self.last_stable_measurements.update(published)
+                self.state.update_measurements(self.last_stable_measurements)
+                self.modbus.update(self.last_stable_measurements)
             time.sleep(runtime.interval)
 
     def _display_loop(self) -> None:
@@ -151,7 +186,32 @@ class GasMonitorCore:
             or runtime.samples != self.runtime.samples
         ):
             self.mics_sensor = self._build_mics_sensor(runtime)
+        if runtime.publish_window != self.runtime.publish_window:
+            self.measurement_window.publish_window = runtime.publish_window
         self.runtime = runtime
+
+    def _filter_measurements(self, measurements: dict[str, float | None]) -> dict[str, float | None]:
+        max_allowed_jump = {
+            "oxygen": self.runtime.oxygen_max_jump,
+            "co": self.runtime.co_max_jump,
+            "no2": self.runtime.no2_max_jump,
+            "nh3": self.runtime.nh3_max_jump,
+        }
+        filtered: dict[str, float | None] = {}
+        for gas, value in measurements.items():
+            previous = self.last_stable_measurements.get(gas)
+            if value is None:
+                continue
+            if previous is not None and abs(value - previous) > max_allowed_jump[gas]:
+                LOGGER.warning(
+                    "ignoring %s jump from %.2f to %.2f",
+                    gas,
+                    previous,
+                    value,
+                )
+                continue
+            filtered[gas] = value
+        return filtered
 
     @staticmethod
     def _build_display(runtime) -> FramebufferDisplay:

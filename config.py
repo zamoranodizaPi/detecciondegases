@@ -40,6 +40,11 @@ DEFAULT_CONFIG = {
     "sampling": {
         "samples": "10",
         "interval": "1",
+        "publish_window": "5",
+        "oxygen_max_jump": "1.5",
+        "co_max_jump": "30",
+        "no2_max_jump": "1.0",
+        "nh3_max_jump": "8.0",
     },
     "calibration": {
         "oxygen_factor": "0.75",
@@ -107,6 +112,11 @@ class RuntimeConfig:
     modbus_port: int
     samples: int
     interval: float
+    publish_window: float
+    oxygen_max_jump: float
+    co_max_jump: float
+    no2_max_jump: float
+    nh3_max_jump: float
     oxygen_factor: float
     co_factor: float
     no2_factor: float
@@ -175,6 +185,11 @@ class ConfigManager:
                 modbus_port=self._parser.getint("modbus", "port"),
                 samples=max(1, self._parser.getint("sampling", "samples")),
                 interval=max(0.2, self._parser.getfloat("sampling", "interval")),
+                publish_window=max(1.0, self._parser.getfloat("sampling", "publish_window")),
+                oxygen_max_jump=max(0.1, self._parser.getfloat("sampling", "oxygen_max_jump")),
+                co_max_jump=max(1.0, self._parser.getfloat("sampling", "co_max_jump")),
+                no2_max_jump=max(0.1, self._parser.getfloat("sampling", "no2_max_jump")),
+                nh3_max_jump=max(0.1, self._parser.getfloat("sampling", "nh3_max_jump")),
                 oxygen_factor=self._parser.getfloat("calibration", "oxygen_factor"),
                 co_factor=self._parser.getfloat("calibration", "co_factor"),
                 no2_factor=self._parser.getfloat("calibration", "no2_factor"),
