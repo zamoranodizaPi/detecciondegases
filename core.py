@@ -36,9 +36,9 @@ class ModbusBridge:
     def update(self, measurements: dict[str, float | None]) -> None:
         values = [
             int(round((measurements.get("oxygen") or 0) * 10)),
-            int(round(measurements.get("co") or 0)),
+            int(round((measurements.get("co") or 0) * 10)),
             int(round((measurements.get("no2") or 0) * 10)),
-            int(round(measurements.get("nh3") or 0)),
+            int(round((measurements.get("nh3") or 0) * 10)),
         ]
         with self._lock:
             self._device_context.setValues(3, 0, values)

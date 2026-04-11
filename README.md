@@ -58,9 +58,9 @@ On first boot:
 ## Modbus Register Map
 
 - `0`: oxygen percent x10
-- `1`: CO ppm
+- `1`: CO ppm x10
 - `2`: NO2 ppm x10
-- `3`: NH3 ppm
+- `3`: NH3 ppm x10
 
 Default Modbus TCP port is `5020`.
 
