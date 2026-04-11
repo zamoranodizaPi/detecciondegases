@@ -66,4 +66,6 @@ class FramebufferDisplay:
             return (60, 220, 120)
         if status == "ALARM":
             return (255, 80, 80)
+        if status == "WAITING":
+            return (160, 180, 200)
         return (255, 180, 60)

@@ -12,7 +12,7 @@ def classify_alarm(measurements: dict[str, float | None], config: RuntimeConfig)
     oxygen = measurements.get("oxygen")
     co = measurements.get("co")
     if oxygen is None:
-        return "FAULT"
+        return "WAITING"
     if oxygen < config.oxygen_low or oxygen > config.oxygen_high:
         return "ALARM"
     if co is not None and co > config.co_high:
