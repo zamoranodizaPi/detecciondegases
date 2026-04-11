@@ -125,14 +125,20 @@ class GasMonitorCore:
             measurements: dict[str, float | None] = {}
             try:
                 measurements.update(self.oxygen_sensor.read())
+                self.state.clear_sensor_fault("oxygen")
             except Exception as exc:
                 LOGGER.warning("oxygen sensor read ignored: %s", exc)
+                self.state.set_sensor_fault("oxygen", str(exc))
 
             if self.mics_sensor is not None:
                 try:
                     measurements.update(self.mics_sensor.read())
+                    self.state.clear_sensor_fault("mics6814")
                 except Exception as exc:
                     LOGGER.warning("mics6814 read ignored: %s", exc)
+                    self.state.set_sensor_fault("mics6814", str(exc))
+            else:
+                self.state.clear_sensor_fault("mics6814")
 
             filtered = self._filter_measurements(measurements)
             for gas, value in filtered.items():

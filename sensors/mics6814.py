@@ -30,6 +30,7 @@ class Mics6814Sensor:
     DATA_RATE_128SPS = 0x0080
     DISABLE_COMPARATOR = 0x0003
     FULL_SCALE_VOLTAGE = 4.096
+    CONVERSION_READY = 0x8000
 
     def __init__(
         self,
@@ -77,12 +78,22 @@ class Mics6814Sensor:
             self.CONFIG_REGISTER,
             [(config >> 8) & 0xFF, config & 0xFF],
         )
-        time.sleep(0.01)
+        self._wait_for_conversion()
         data = bus.read_i2c_block_data(self.address, self.CONVERSION_REGISTER, 2)
         raw_value = (data[0] << 8) | data[1]
         if raw_value & 0x8000:
             raw_value -= 0x10000
         return max(0.0, raw_value * self.FULL_SCALE_VOLTAGE / 32768.0)
+
+    def _wait_for_conversion(self) -> None:
+        deadline = time.monotonic() + 0.1
+        while time.monotonic() < deadline:
+            data = self._get_bus().read_i2c_block_data(self.address, self.CONFIG_REGISTER, 2)
+            config = (data[0] << 8) | data[1]
+            if config & self.CONVERSION_READY:
+                return
+            time.sleep(0.002)
+        raise TimeoutError("ADS1115 conversion timed out")
 
     def _get_bus(self) -> SMBus:
         if self._bus is None:
