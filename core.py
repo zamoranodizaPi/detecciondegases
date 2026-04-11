@@ -108,6 +108,8 @@ class GasMonitorCore:
     def stop(self) -> None:
         self.stop_event.set()
         self.oxygen_sensor.close()
+        if self.mics_sensor is not None:
+            self.mics_sensor.close()
 
     def _start_thread(self, name: str, target) -> None:
         thread = threading.Thread(name=name, target=target, daemon=True)
@@ -179,12 +181,15 @@ class GasMonitorCore:
             self.oxygen_sensor = self._build_oxygen_sensor(runtime)
         if (
             runtime.mics_enabled != self.runtime.mics_enabled
-            or runtime.mics_path != self.runtime.mics_path
+            or runtime.i2c_bus != self.runtime.i2c_bus
+            or runtime.mics_address != self.runtime.mics_address
             or runtime.co_factor != self.runtime.co_factor
             or runtime.no2_factor != self.runtime.no2_factor
             or runtime.nh3_factor != self.runtime.nh3_factor
             or runtime.samples != self.runtime.samples
         ):
+            if self.mics_sensor is not None:
+                self.mics_sensor.close()
             self.mics_sensor = self._build_mics_sensor(runtime)
         if runtime.publish_window != self.runtime.publish_window:
             self.measurement_window.publish_window = runtime.publish_window
@@ -236,7 +241,8 @@ class GasMonitorCore:
         if not runtime.mics_enabled:
             return None
         return Mics6814Sensor(
-            device_path=runtime.mics_path,
+            bus_id=runtime.i2c_bus,
+            address=runtime.mics_address,
             samples=runtime.samples,
             calibration={
                 "co": runtime.co_factor,

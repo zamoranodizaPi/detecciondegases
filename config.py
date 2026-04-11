@@ -16,7 +16,7 @@ DEFAULT_CONFIG = {
         "i2c_bus": "1",
         "oxygen_address": "0x73",
         "mics_enabled": "true",
-        "mics_path": "/sys/bus/iio/devices/iio:device0",
+        "mics_address": "0x48",
         "framebuffer": "/dev/fb1",
         "display_width": "480",
         "display_height": "320",
@@ -96,7 +96,7 @@ class RuntimeConfig:
     i2c_bus: int
     oxygen_address: int
     mics_enabled: bool
-    mics_path: str
+    mics_address: int
     framebuffer: str
     display_width: int
     display_height: int
@@ -169,7 +169,7 @@ class ConfigManager:
                 i2c_bus=self._parser.getint("hardware", "i2c_bus"),
                 oxygen_address=int(get("hardware", "oxygen_address"), 0),
                 mics_enabled=self._parser.getboolean("hardware", "mics_enabled"),
-                mics_path=get("hardware", "mics_path"),
+                mics_address=int(get("hardware", "mics_address"), 0),
                 framebuffer=get("hardware", "framebuffer"),
                 display_width=self._parser.getint("hardware", "display_width"),
                 display_height=self._parser.getint("hardware", "display_height"),

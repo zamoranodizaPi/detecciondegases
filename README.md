@@ -3,7 +3,7 @@
 GasMonitor is a modular gas monitoring service for Raspberry Pi 3 with:
 
 - oxygen sensing through DFRobot SEN0322 over I2C
-- multi-gas support for MICS-6814 through Linux IIO channels
+- multi-gas support for MICS-6814/CJMCU through ADS1115 over I2C
 - Modbus TCP server
 - FastAPI web dashboard for monitoring and configuration
 - framebuffer-driven 3.5 inch SPI display
@@ -106,10 +106,11 @@ python3 main.py --config config.ini
 ## Hardware Notes
 
 - SEN0322 oxygen sensor defaults to I2C address `0x73`
-- MICS-6814 input is implemented against Linux IIO files at `/sys/bus/iio/devices/iio:device0`
+- ADS1115 defaults to I2C address `0x48`
+- MICS-6814/CJMCU channels are mapped as CO -> ADS1115 A0, NH3 -> ADS1115 A1, NO2/OX -> ADS1115 A2
 - the SPI TFT must already be exposed as a framebuffer such as `/dev/fb1`
 
-If your MICS board exposes channels differently, update `sensors/mics6814.py` or point `mics_path` to the correct IIO device.
+If your ADS1115 address is different, update `mics_address` in `config.ini`.
 
 ## Logs and Service
 
