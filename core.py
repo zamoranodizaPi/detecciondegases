@@ -16,7 +16,7 @@ from pymodbus.server import StartTcpServer
 from auth import TokenStore
 from config import ConfigManager
 from display import FramebufferDisplay
-from sensors import Mics6814Sensor, OxygenSensor
+from sensors import Mics6814Sensor, NoisyOxygenReading, OxygenSensor
 from shared_state import SharedState
 from web_server import WebServerThread
 
@@ -125,6 +125,9 @@ class GasMonitorCore:
             measurements: dict[str, float | None] = {}
             try:
                 measurements.update(self.oxygen_sensor.read())
+                self.state.clear_sensor_fault("oxygen")
+            except NoisyOxygenReading as exc:
+                LOGGER.warning("oxygen noisy sample ignored: %s", exc)
                 self.state.clear_sensor_fault("oxygen")
             except Exception as exc:
                 LOGGER.warning("oxygen sensor read ignored: %s", exc)

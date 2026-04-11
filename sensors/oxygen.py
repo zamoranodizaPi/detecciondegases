@@ -14,6 +14,10 @@ GET_KEY_REGISTER = 0x0A
 DEFAULT_KEY = 20.9 / 120.0
 
 
+class NoisyOxygenReading(ValueError):
+    pass
+
+
 class OxygenSensor:
     def __init__(self, bus_id: int, address: int, calibration_factor: float, samples: int) -> None:
         self.bus_id = bus_id
@@ -27,7 +31,7 @@ class OxygenSensor:
         raw = self._read_oxygen_raw()
         value = key * raw * self.calibration_factor
         if value <= 0 or value > 25:
-            raise ValueError(f"oxygen reading out of range: {value:.2f}")
+            raise NoisyOxygenReading(f"oxygen reading out of range: {value:.2f}")
         self.history.append(value)
         return {"oxygen": round(sum(self.history) / len(self.history), 2)}
 
