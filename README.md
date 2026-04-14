@@ -76,6 +76,17 @@ The dashboard serves at `/` and static assets are under `/web`.
 
 ## Install on Raspberry Pi
 
+Install the MHS-3.5inch framebuffer driver first if `/dev/fb1` is not present:
+
+```bash
+git clone https://github.com/goodtft/LCD-show.git
+chmod -R 755 LCD-show
+cd LCD-show
+sudo ./MHS35-show
+```
+
+The driver install reboots the Raspberry Pi. After it comes back:
+
 ```bash
 cd /opt
 sudo git clone https://github.com/zamoranodizaPi/detecciondegases.git gasmonitor
@@ -105,6 +116,12 @@ python3 main.py --config config.ini
 
 ## Hardware Notes
 
+- MHS-3.5inch RPi Display uses SPI for LCD and touch: GPIO17, GPIO24, GPIO10, GPIO9, GPIO25, GPIO11, GPIO8, and GPIO7.
+- The MHS page marks physical pins 3 and 5 as NC, so sensors stay on the normal Raspberry Pi I2C bus:
+  - SDA: physical pin 3 / GPIO2
+  - SCL: physical pin 5 / GPIO3
+  - `i2c_bus = 1`, exposed as `/dev/i2c-1`
+- Keep sensor power on 3.3V/GND. Do not power I2C pullups from 5V.
 - SEN0322 oxygen sensor defaults to I2C address `0x73`
 - ADS1115 defaults to I2C address `0x48`
 - MICS-6814/CJMCU channels are mapped as CO -> ADS1115 A0, NH3 -> ADS1115 A1, NO2/OX -> ADS1115 A2
