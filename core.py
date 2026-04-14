@@ -157,7 +157,7 @@ class GasMonitorCore:
     def _display_loop(self) -> None:
         while not self.stop_event.is_set():
             self.display.render(self.state.snapshot())
-            time.sleep(1.0)
+            time.sleep(0.2)
 
     @staticmethod
     def _get_ip_address() -> str:
@@ -227,13 +227,13 @@ class GasMonitorCore:
             filtered[gas] = value
         return filtered
 
-    @staticmethod
-    def _build_display(runtime) -> FramebufferDisplay:
+    def _build_display(self, runtime) -> FramebufferDisplay:
         return FramebufferDisplay(
             framebuffer=runtime.framebuffer,
             width=runtime.display_width,
             height=runtime.display_height,
             rotate=runtime.display_rotate,
+            config_manager=self.config_manager,
         )
 
     @staticmethod

@@ -37,7 +37,7 @@ if [[ "${ENABLE_INTERFACES}" == "1" ]] && command -v raspi-config >/dev/null 2>&
 fi
 
 echo "[3/8] Granting hardware access groups..."
-usermod -aG i2c,spi,video "${APP_USER}" || true
+usermod -aG i2c,spi,video,input "${APP_USER}" || true
 
 echo "[4/8] Copying application into ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"

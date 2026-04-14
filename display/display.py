@@ -1,44 +1,184 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 from PIL import Image, ImageDraw, ImageFont
+
+try:
+    from evdev import InputDevice, ecodes, list_devices
+except ImportError:  # pragma: no cover - optional Raspberry Pi touchscreen dependency
+    InputDevice = None
+    ecodes = None
+    list_devices = None
+
+from config import ConfigManager
 
 
 LOGGER = logging.getLogger(__name__)
 
+Color = tuple[int, int, int]
+
+
+GREEN = (22, 155, 92)
+YELLOW = (214, 183, 41)
+ORANGE = (223, 113, 30)
+RED = (202, 48, 49)
+INK = (245, 248, 250)
+MUTED = (169, 181, 194)
+PANEL = (20, 27, 34)
+BLACK = (7, 10, 13)
+
+
+@dataclass(frozen=True)
+class ConfigField:
+    section: str
+    key: str
+    label: str
+    kind: str = "text"
+    choices: tuple[str, ...] = ()
+
+
+@dataclass
+class Button:
+    rect: tuple[int, int, int, int]
+    label: str
+    action: Callable[[], None]
+
+
+class TouchInput:
+    def __init__(self, width: int, height: int) -> None:
+        self.width = width
+        self.height = height
+        self.device = self._open_device()
+        self.x: int | None = None
+        self.y: int | None = None
+        self.touching = False
+        self.max_x = 4095
+        self.max_y = 4095
+        if self.device is not None:
+            self._load_abs_ranges()
+
+    def read_tap(self) -> tuple[int, int] | None:
+        if self.device is None or ecodes is None:
+            return None
+        tap: tuple[int, int] | None = None
+        try:
+            for event in self.device.read():
+                if event.type == ecodes.EV_ABS:
+                    if event.code in (ecodes.ABS_X, ecodes.ABS_MT_POSITION_X):
+                        self.x = event.value
+                    elif event.code in (ecodes.ABS_Y, ecodes.ABS_MT_POSITION_Y):
+                        self.y = event.value
+                elif event.type == ecodes.EV_KEY and event.code in (ecodes.BTN_TOUCH, ecodes.BTN_LEFT):
+                    if event.value:
+                        self.touching = True
+                    elif self.touching and self.x is not None and self.y is not None:
+                        self.touching = False
+                        tap = self._scale(self.x, self.y)
+        except BlockingIOError:
+            return tap
+        except OSError as exc:
+            LOGGER.warning("touch read failed: %s", exc)
+            self.device = None
+        return tap
+
+    def _scale(self, raw_x: int, raw_y: int) -> tuple[int, int]:
+        x = int(max(0, min(raw_x, self.max_x)) * (self.width - 1) / max(1, self.max_x))
+        y = int(max(0, min(raw_y, self.max_y)) * (self.height - 1) / max(1, self.max_y))
+        return x, y
+
+    def _load_abs_ranges(self) -> None:
+        if self.device is None or ecodes is None:
+            return
+        caps = self.device.capabilities(absinfo=True)
+        for code, info in caps.get(ecodes.EV_ABS, []):
+            if code in (ecodes.ABS_X, ecodes.ABS_MT_POSITION_X):
+                self.max_x = max(1, info.max)
+            elif code in (ecodes.ABS_Y, ecodes.ABS_MT_POSITION_Y):
+                self.max_y = max(1, info.max)
+
+    @staticmethod
+    def _open_device() -> InputDevice | None:
+        if InputDevice is None or list_devices is None:
+            LOGGER.info("evdev not installed; touchscreen menus disabled")
+            return None
+        for path in list_devices():
+            try:
+                device = InputDevice(path)
+                name = device.name.lower()
+                if any(token in name for token in ("touch", "ads7846", "xpt2046", "stmpe")):
+                    device.grab()
+                    device.set_nonblocking(True)
+                    LOGGER.info("using touchscreen input %s (%s)", device.path, device.name)
+                    return device
+            except OSError:
+                continue
+        LOGGER.info("touchscreen input device not found; menus disabled")
+        return None
+
 
 class FramebufferDisplay:
-    def __init__(self, framebuffer: str, width: int, height: int, rotate: int = 0) -> None:
+    FIELDS: tuple[ConfigField, ...] = (
+        ConfigField("system", "device_name", "Device name"),
+        ConfigField("web", "port", "Web port", "number"),
+        ConfigField("web", "username", "Web user"),
+        ConfigField("web", "password", "New password"),
+        ConfigField("network", "mode", "Network mode", "choice", ("dhcp", "static")),
+        ConfigField("network", "static_ip", "Static IP", "numeric_text"),
+        ConfigField("network", "gateway", "Gateway", "numeric_text"),
+        ConfigField("network", "dns", "DNS", "numeric_text"),
+        ConfigField("alarms", "oxygen_low", "Low O2 alarm", "number"),
+        ConfigField("alarms", "oxygen_high", "High O2 alarm", "number"),
+        ConfigField("alarms", "co_high", "CO alarm", "number"),
+    )
+
+    SECTIONS = ("system", "web", "network", "alarms")
+
+    def __init__(
+        self,
+        framebuffer: str,
+        width: int,
+        height: int,
+        rotate: int = 0,
+        config_manager: ConfigManager | None = None,
+    ) -> None:
         self.framebuffer = framebuffer
         self.width = width
         self.height = height
         self.rotate = rotate
-        self.font_large = ImageFont.load_default()
-        self.font_small = ImageFont.load_default()
+        self.config_manager = config_manager
+        self.touch = TouchInput(width, height)
+        self.view = "home"
+        self.section = "alarms"
+        self.edit_field: ConfigField | None = None
+        self.edit_value = ""
+        self.message = ""
+        self.buttons: list[Button] = []
+        self.font_xl = self._font(42)
+        self.font_large = self._font(32)
+        self.font_medium = self._font(22)
+        self.font_small = self._font(16)
 
     def render(self, snapshot: dict[str, object]) -> None:
+        self._handle_touch()
         if self.framebuffer.lower() == "none":
             return
 
-        image = Image.new("RGB", (self.width, self.height), color=(10, 14, 18))
+        image = Image.new("RGB", (self.width, self.height), color=BLACK)
         draw = ImageDraw.Draw(image)
+        self.buttons = []
 
-        status = str(snapshot["status"])
-        measurements = snapshot["measurements"]
-        oxygen = measurements.get("oxygen")
-        co = measurements.get("co")
-        ip_address = snapshot["ip_address"]
-
-        draw.text((20, 20), str(snapshot["device_name"]), fill=(240, 240, 240), font=self.font_large)
-        draw.text((20, 70), f"O2: {self._format_value(oxygen, '%')}", fill=(80, 220, 140), font=self.font_large)
-        draw.text((20, 110), f"CO: {self._format_value(co, 'ppm')}", fill=(240, 220, 80), font=self.font_large)
-        draw.text((20, 160), f"STATUS: {status}", fill=self._status_color(status), font=self.font_large)
-        draw.text((20, 200), f"IP: {ip_address}", fill=(220, 220, 220), font=self.font_small)
-
-        if snapshot.get("first_run"):
-            draw.text((20, 250), "CONFIG MODE - CHANGE PASSWORD", fill=(255, 120, 120), font=self.font_small)
+        if self.view == "menu":
+            self._draw_menu(draw)
+        elif self.view == "form":
+            self._draw_form(draw)
+        elif self.view == "edit":
+            self._draw_editor(draw)
+        else:
+            self._draw_home(draw, snapshot)
 
         if self.rotate:
             image = image.rotate(self.rotate, expand=True)
@@ -54,6 +194,186 @@ class FramebufferDisplay:
         except OSError as exc:
             LOGGER.warning("display render failed: %s", exc)
 
+    def _draw_home(self, draw: ImageDraw.ImageDraw, snapshot: dict[str, object]) -> None:
+        measurements = snapshot["measurements"]
+        if not isinstance(measurements, dict):
+            measurements = {}
+        alarms = snapshot.get("alarms", {})
+        if not isinstance(alarms, dict):
+            alarms = {}
+
+        draw.rectangle((0, 0, self.width, 48), fill=(16, 22, 29))
+        self._draw_brand_icon(draw, 14, 8)
+        draw.text((58, 8), "Gas Monitor", fill=INK, font=self.font_large)
+        draw.text((330, 14), str(snapshot.get("status", "BOOT")), fill=self._status_color(str(snapshot.get("status", ""))), font=self.font_medium)
+
+        rows = (
+            ("CO", measurements.get("co"), "ppm", self._gas_color("co", measurements.get("co"), alarms)),
+            ("Oxygen", measurements.get("oxygen"), "%", self._gas_color("oxygen", measurements.get("oxygen"), alarms)),
+            ("NH3", measurements.get("nh3"), "ppm", self._gas_color("nh3", measurements.get("nh3"), alarms)),
+            ("NO2", measurements.get("no2"), "ppm", self._gas_color("no2", measurements.get("no2"), alarms)),
+        )
+        y = 48
+        row_h = 54
+        for label, value, unit, color in rows:
+            draw.rectangle((0, y, self.width, y + row_h - 1), fill=color)
+            draw.text((18, y + 10), label, fill=INK, font=self.font_large)
+            text = self._format_value(value, unit)
+            text_w = self._text_width(draw, text, self.font_xl)
+            draw.text((self.width - text_w - 18, y + 4), text, fill=INK, font=self.font_xl)
+            y += row_h
+
+        draw.rectangle((0, y, self.width, self.height), fill=(15, 20, 26))
+        ip_address = str(snapshot.get("ip_address", "0.0.0.0"))
+        draw.text((16, y + 14), f"IP {ip_address}", fill=MUTED, font=self.font_small)
+        self._button(draw, (330, y + 8, 466, self.height - 8), "MENU", lambda: self._go("menu"), fill=(35, 87, 125))
+
+    def _draw_menu(self, draw: ImageDraw.ImageDraw) -> None:
+        self._title(draw, "Menu")
+        y = 62
+        for section in self.SECTIONS:
+            self._button(draw, (28, y, self.width - 28, y + 44), section.upper(), lambda s=section: self._open_section(s))
+            y += 52
+        self._button(draw, (28, self.height - 50, 162, self.height - 10), "BACK", lambda: self._go("home"), fill=(70, 77, 85))
+
+    def _draw_form(self, draw: ImageDraw.ImageDraw) -> None:
+        self._title(draw, self.section.upper())
+        config = self._config()
+        fields = [field for field in self.FIELDS if field.section == self.section]
+        y = 58
+        for field in fields[:4]:
+            value = config.get(field.section, {}).get(field.key, "")
+            if field.key == "password":
+                value = "tap to set"
+            label = f"{field.label}: {value}"
+            self._button(draw, (16, y, self.width - 16, y + 42), label, lambda f=field: self._open_editor(f), fill=(29, 41, 53))
+            y += 48
+        self._button(draw, (16, self.height - 48, 150, self.height - 10), "BACK", lambda: self._go("menu"), fill=(70, 77, 85))
+        if self.message:
+            draw.text((168, self.height - 38), self.message, fill=YELLOW, font=self.font_small)
+
+    def _draw_editor(self, draw: ImageDraw.ImageDraw) -> None:
+        field = self.edit_field
+        if field is None:
+            self._go("form")
+            return
+        self._title(draw, field.label)
+        draw.rectangle((16, 54, self.width - 16, 92), fill=(242, 245, 247))
+        draw.text((26, 62), self.edit_value or " ", fill=(8, 12, 16), font=self.font_medium)
+
+        if field.kind == "choice":
+            y = 110
+            for choice in field.choices:
+                self._button(draw, (44, y, self.width - 44, y + 48), choice.upper(), lambda value=choice: self._save_editor(value))
+                y += 60
+        else:
+            keys = self._keyboard_keys(field.kind)
+            x = 16
+            y = 110
+            key_w = 42
+            key_h = 32
+            for key in keys:
+                if key == "\n":
+                    x = 16
+                    y += key_h + 8
+                    continue
+                label = "SP" if key == " " else key
+                self._button(draw, (x, y, x + key_w, y + key_h), label, lambda k=key: self._add_key(k), fill=(37, 49, 62), font=self.font_small)
+                x += key_w + 6
+        self._button(draw, (16, self.height - 44, 112, self.height - 8), "BACK", lambda: self._go("form"), fill=(70, 77, 85))
+        self._button(draw, (126, self.height - 44, 238, self.height - 8), "DEL", self._delete_key, fill=ORANGE)
+        self._button(draw, (self.width - 128, self.height - 44, self.width - 16, self.height - 8), "OK", lambda: self._save_editor(self.edit_value), fill=GREEN)
+
+    def _button(
+        self,
+        draw: ImageDraw.ImageDraw,
+        rect: tuple[int, int, int, int],
+        label: str,
+        action: Callable[[], None],
+        fill: Color = (32, 63, 83),
+        font: ImageFont.ImageFont | None = None,
+    ) -> None:
+        self.buttons.append(Button(rect, label, action))
+        draw.rounded_rectangle(rect, radius=6, fill=fill)
+        font = font or self.font_medium
+        text_w = self._text_width(draw, label, font)
+        text_h = self._text_height(draw, label, font)
+        x1, y1, x2, y2 = rect
+        draw.text((x1 + ((x2 - x1) - text_w) / 2, y1 + ((y2 - y1) - text_h) / 2 - 1), label, fill=INK, font=font)
+
+    def _title(self, draw: ImageDraw.ImageDraw, text: str) -> None:
+        draw.rectangle((0, 0, self.width, 46), fill=(16, 22, 29))
+        self._draw_brand_icon(draw, 12, 7)
+        draw.text((56, 9), text, fill=INK, font=self.font_medium)
+
+    def _draw_brand_icon(self, draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
+        draw.rounded_rectangle((x, y, x + 32, y + 32), radius=6, fill=GREEN)
+        draw.ellipse((x + 8, y + 7, x + 24, y + 23), fill=(230, 255, 240))
+        draw.rectangle((x + 14, y + 20, x + 18, y + 28), fill=(230, 255, 240))
+
+    def _handle_touch(self) -> None:
+        tap = self.touch.read_tap()
+        if tap is None:
+            return
+        x, y = tap
+        for button in reversed(self.buttons):
+            x1, y1, x2, y2 = button.rect
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                button.action()
+                return
+
+    def _open_section(self, section: str) -> None:
+        self.section = section
+        self.message = ""
+        self._go("form")
+
+    def _open_editor(self, field: ConfigField) -> None:
+        self.edit_field = field
+        config = self._config()
+        self.edit_value = "" if field.key == "password" else str(config.get(field.section, {}).get(field.key, ""))
+        self._go("edit")
+
+    def _save_editor(self, value: str) -> None:
+        field = self.edit_field
+        if field is None or self.config_manager is None:
+            return
+        value = value.strip()
+        if field.key == "password" and not value:
+            self.message = "Password unchanged"
+            self._go("form")
+            return
+        try:
+            runtime = self.config_manager.update({field.section: {field.key: value}})
+            if field.section == "network":
+                self.config_manager.apply_network_profile()
+            if field.section == "web" and field.key == "password" and runtime.first_run:
+                self.config_manager.set_first_run(False)
+            self.message = "Saved"
+        except Exception as exc:
+            LOGGER.warning("touch config save failed: %s", exc)
+            self.message = "Save failed"
+        self._go("form")
+
+    def _add_key(self, key: str) -> None:
+        self.edit_value = (self.edit_value + key)[:32]
+
+    def _delete_key(self) -> None:
+        self.edit_value = self.edit_value[:-1]
+
+    def _go(self, view: str) -> None:
+        self.view = view
+
+    def _config(self) -> dict[str, dict[str, Any]]:
+        if self.config_manager is None:
+            return {}
+        return self.config_manager.to_dict(include_secrets=False)
+
+    @staticmethod
+    def _keyboard_keys(kind: str) -> tuple[str, ...]:
+        if kind in ("number", "numeric_text"):
+            return tuple("1234567890.-/") + ("\n",) + tuple("ABCDEFabcdef:")
+        return tuple("QWERTYUIOP") + ("\n",) + tuple("ASDFGHJKL") + ("\n",) + tuple("ZXCVBNM0123") + ("\n",) + tuple("456789.-_ ")
+
     @staticmethod
     def _format_value(value: object, suffix: str) -> str:
         if value is None:
@@ -61,11 +381,78 @@ class FramebufferDisplay:
         return f"{value} {suffix}"
 
     @staticmethod
-    def _status_color(status: str) -> tuple[int, int, int]:
+    def _font(size: int) -> ImageFont.ImageFont:
+        for path in (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ):
+            try:
+                return ImageFont.truetype(path, size=size)
+            except OSError:
+                continue
+        return ImageFont.load_default()
+
+    @staticmethod
+    def _status_color(status: str) -> Color:
         if status == "NORMAL":
-            return (60, 220, 120)
+            return GREEN
         if status == "ALARM":
-            return (255, 80, 80)
+            return RED
         if status == "WAITING":
-            return (160, 180, 200)
-        return (255, 180, 60)
+            return YELLOW
+        return ORANGE
+
+    def _gas_color(self, gas: str, value: object, alarms: dict[str, object]) -> Color:
+        if value is None:
+            return (82, 88, 94)
+        numeric = float(value)
+        runtime = self.config_manager.runtime() if self.config_manager is not None else None
+        if gas == "co" and alarms.get("co_high"):
+            return RED
+        if gas == "co" and runtime is not None:
+            if numeric >= runtime.co_high:
+                return RED
+            if numeric >= runtime.co_high * 0.85:
+                return ORANGE
+            if numeric >= runtime.co_high * 0.70:
+                return YELLOW
+            return GREEN
+        if gas == "oxygen":
+            if alarms.get("oxygen_low") or alarms.get("oxygen_high"):
+                return RED
+            if runtime is not None:
+                low_span = max(0.1, 20.9 - runtime.oxygen_low)
+                high_span = max(0.1, runtime.oxygen_high - 20.9)
+                if numeric < runtime.oxygen_low + low_span * 0.35:
+                    return ORANGE
+                if numeric < runtime.oxygen_low + low_span * 0.60:
+                    return YELLOW
+                if numeric > runtime.oxygen_high - high_span * 0.35:
+                    return ORANGE
+                if numeric > runtime.oxygen_high - high_span * 0.60:
+                    return YELLOW
+            return GREEN
+        if gas == "nh3":
+            if numeric >= 50:
+                return RED
+            if numeric >= 25:
+                return ORANGE
+            if numeric >= 10:
+                return YELLOW
+        if gas == "no2":
+            if numeric >= 5:
+                return RED
+            if numeric >= 2:
+                return ORANGE
+            if numeric >= 1:
+                return YELLOW
+        return GREEN
+
+    @staticmethod
+    def _text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
+        return int(draw.textbbox((0, 0), text, font=font)[2])
+
+    @staticmethod
+    def _text_height(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return int(bbox[3] - bbox[1])

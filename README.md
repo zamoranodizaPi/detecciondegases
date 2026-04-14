@@ -98,7 +98,7 @@ The installer:
 
 - installs required OS packages
 - enables I2C and SPI when `raspi-config` is present
-- adds the runtime user to `i2c`, `spi`, and `video`
+- adds the runtime user to `i2c`, `spi`, `video`, and `input`
 - copies the application to `/opt/gasmonitor`
 - creates `.venv`
 - installs Python dependencies
@@ -128,6 +128,22 @@ python3 main.py --config config.ini
 - the SPI TFT must already be exposed as a framebuffer such as `/dev/fb1`
 
 If your ADS1115 address is different, update `mics_address` in `config.ini`.
+
+## Touchscreen UI
+
+The framebuffer display is designed for landscape `480x320`.
+
+- First row: Gas Monitor title, branding icon, and status
+- Measurement rows: CO, Oxygen, NH3, NO2
+- Bottom row: IP address and touch menu button
+- Colors: green for normal, yellow for attention, orange for warning, red for alarm/danger
+
+The touch menu can edit the same commissioning values exposed in the web dashboard:
+
+- system device name
+- web port, username, and password
+- network mode, static IP, gateway, and DNS
+- oxygen and CO alarm thresholds
 
 ## Logs and Service
 
