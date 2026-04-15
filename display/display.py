@@ -528,25 +528,32 @@ class FramebufferDisplay:
         if tap is None:
             return
         mapped_x, mapped_y = tap
-        x, y = self._touch_to_ui(mapped_x, mapped_y)
+        candidates = self._touch_candidates(mapped_x, mapped_y)
         self._last_touch_at = time.monotonic()
-        LOGGER.info("touch tap mapped to %s,%s ui=%s,%s on view %s", mapped_x, mapped_y, x, y, self.view)
+        LOGGER.info("touch tap mapped to %s,%s candidates=%s on view %s", mapped_x, mapped_y, candidates, self.view)
+        for index, (x, y) in enumerate(candidates):
+            if self._dispatch_touch(x, y, index):
+                return
+        LOGGER.info("touch missed %s buttons", len(self.buttons))
+
+    def _dispatch_touch(self, x: int, y: int, candidate_index: int) -> bool:
         if self.view == "home" and x >= 180 and y >= 400:
-            LOGGER.info("touch hit home menu hot zone")
+            LOGGER.info("touch hit home menu hot zone candidate=%s", candidate_index)
             self._go("menu")
-            return
+            return True
         for button in reversed(self.buttons):
             x1, y1, x2, y2 = button.rect
             if (
                 x1 - TOUCH_HIT_SLOP <= x <= x2 + TOUCH_HIT_SLOP
                 and y1 - TOUCH_HIT_SLOP <= y <= y2 + TOUCH_HIT_SLOP
             ):
-                LOGGER.info("touch hit button %s", button.label)
+                LOGGER.info("touch hit button %s candidate=%s", button.label, candidate_index)
                 button.action()
-                return
+                return True
         if self._handle_view_hot_zone(x, y):
-            return
-        LOGGER.info("touch missed %s buttons", len(self.buttons))
+            LOGGER.info("touch hit view hot zone candidate=%s", candidate_index)
+            return True
+        return False
 
     def _handle_view_hot_zone(self, x: int, y: int) -> bool:
         if self.view == "menu":
@@ -604,11 +611,22 @@ class FramebufferDisplay:
                     return True
         return False
 
-    def _touch_to_ui(self, x: int, y: int) -> tuple[int, int]:
-        return (
-            max(0, min(x + TOUCH_UI_OFFSET_X, self.width - 1)),
-            max(0, min(y + TOUCH_UI_OFFSET_Y, self.height - 1)),
-        )
+    def _touch_candidates(self, x: int, y: int) -> list[tuple[int, int]]:
+        candidates = [
+            (x + TOUCH_UI_OFFSET_X, y + TOUCH_UI_OFFSET_Y),
+            (x, y),
+            (x, y + TOUCH_UI_OFFSET_Y),
+            (x + TOUCH_UI_OFFSET_X, y),
+        ]
+        unique: list[tuple[int, int]] = []
+        for candidate_x, candidate_y in candidates:
+            point = (
+                max(0, min(candidate_x, self.width - 1)),
+                max(0, min(candidate_y, self.height - 1)),
+            )
+            if point not in unique:
+                unique.append(point)
+        return unique
 
     @staticmethod
     def _row_index(y: int, top: int, bottom: int, count: int) -> int | None:
