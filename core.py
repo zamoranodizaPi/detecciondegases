@@ -7,16 +7,10 @@ import threading
 import time
 from collections import defaultdict
 
-from pymodbus.datastore import ModbusSequentialDataBlock, ModbusServerContext
-try:
-    from pymodbus.datastore import ModbusDeviceContext
-except ImportError:
-    from pymodbus.datastore import ModbusSlaveContext as ModbusDeviceContext
-from pymodbus.server import StartTcpServer
-
 from auth import TokenStore
 from config import ConfigManager
 from display import FramebufferDisplay
+from modbus_server import IndustrialModbusServer
 from sensors import Mics6814Sensor, NoisyOxygenReading, OxygenSensor
 from shared_state import SharedState
 from web_server import WebServerThread
@@ -25,30 +19,6 @@ from utils.state_machine import SystemState
 
 LOGGER = logging.getLogger(__name__)
 WARMUP_SECONDS = 5.0
-
-
-class ModbusBridge:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._device_context = ModbusDeviceContext(hr=ModbusSequentialDataBlock(0, [0] * 10))
-        try:
-            self._context = ModbusServerContext(devices=self._device_context, single=True)
-        except TypeError:
-            self._context = ModbusServerContext(slaves=self._device_context, single=True)
-
-    def update(self, measurements: dict[str, float | None]) -> None:
-        values = [
-            int(round((measurements.get("oxygen") or 0) * 10)),
-            int(round((measurements.get("co") or 0) * 10)),
-            int(round((measurements.get("no2") or 0) * 10)),
-            int(round((measurements.get("nh3") or 0) * 10)),
-        ]
-        with self._lock:
-            self._device_context.setValues(3, 0, values)
-
-    def serve(self, port: int) -> None:
-        LOGGER.info("starting modbus tcp server on port %s", port)
-        StartTcpServer(context=self._context, address=("0.0.0.0", port))
 
 
 class MeasurementWindow:
@@ -85,7 +55,7 @@ class GasMonitorCore:
             require_password_change=self.runtime.first_run,
         )
         self.stop_event = threading.Event()
-        self.modbus = ModbusBridge()
+        self.modbus = IndustrialModbusServer(config_manager, self.state)
         self.token_store = TokenStore(config_manager)
         self.display = self._build_display(self.runtime)
         self.started_at = time.monotonic()
@@ -108,13 +78,14 @@ class GasMonitorCore:
         if self.runtime.watchdog_enabled:
             self._start_thread("watchdog-loop", self._watchdog_loop)
         if self.runtime.modbus_enabled:
-            self._start_thread("modbus-server", lambda: self.modbus.serve(self.runtime.modbus_port))
+            self._start_thread("modbus-server", self.modbus.serve_forever)
 
         while not self.stop_event.is_set():
             time.sleep(1.0)
 
     def stop(self) -> None:
         self.stop_event.set()
+        self.modbus.stop()
         if self.oxygen_sensor is not None:
             self.oxygen_sensor.close()
         if self.mics_sensor is not None:
@@ -169,7 +140,6 @@ class GasMonitorCore:
                 published = self.measurement_window.publish(self.last_stable_measurements)
                 self.last_stable_measurements.update(published)
                 self.state.update_measurements(self.last_stable_measurements)
-                self.modbus.update(self.last_stable_measurements)
                 self.sensor_heartbeat = time.monotonic()
                 self.state.mark_sensor_heartbeat(self.sensor_heartbeat)
                 self._log_alarm_transition()

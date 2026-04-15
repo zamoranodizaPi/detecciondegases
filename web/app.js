@@ -34,6 +34,14 @@ function fillConfig(config) {
   document.getElementById("displayBrightness").value = config.display?.brightness || 100;
   document.getElementById("watchdogEnabled").value = config.system.watchdog_enabled || "true";
   document.getElementById("logRetentionDays").value = config.system.log_retention_days || 7;
+  document.getElementById("modbusEnabled").value = config.modbus?.enabled || "true";
+  document.getElementById("modbusHost").value = config.modbus?.host || "0.0.0.0";
+  document.getElementById("modbusPort").value = config.modbus?.port || 5020;
+  document.getElementById("modbusMaxClients").value = config.modbus?.max_clients || 5;
+  document.getElementById("modbusTimeout").value = config.modbus?.timeout || 10;
+  document.getElementById("modbusReadOnly").value = config.modbus?.read_only || "true";
+  document.getElementById("modbusWhitelist").value = config.modbus?.whitelist || "";
+  document.getElementById("modbusDebug").value = config.modbus?.debug || "false";
 }
 
 function normalizeStatus(status) {
@@ -106,6 +114,16 @@ async function saveConfig() {
       oxygen_low: document.getElementById("oxygenLow").value,
       oxygen_high: document.getElementById("oxygenHigh").value,
       co_high: document.getElementById("coHigh").value,
+    },
+    modbus: {
+      enabled: document.getElementById("modbusEnabled").value,
+      host: document.getElementById("modbusHost").value,
+      port: document.getElementById("modbusPort").value,
+      max_clients: document.getElementById("modbusMaxClients").value,
+      timeout: document.getElementById("modbusTimeout").value,
+      read_only: document.getElementById("modbusReadOnly").value,
+      whitelist: document.getElementById("modbusWhitelist").value,
+      debug: document.getElementById("modbusDebug").value,
     },
   };
   try {

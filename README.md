@@ -22,6 +22,8 @@ GasMonitor is a modular gas monitoring service for Raspberry Pi 3 with:
 ├── logging_utils.py
 ├── auth.py
 ├── config.ini
+├── modbus_server.py
+├── register_map.py
 ├── sensors/
 │   ├── oxygen.py
 │   └── mics6814.py
@@ -30,6 +32,10 @@ GasMonitor is a modular gas monitoring service for Raspberry Pi 3 with:
 ├── web/
 │   ├── index.html
 │   └── app.js
+├── docs/
+│   └── modbus_register_map.md
+├── tools/
+│   └── modbus_client.py
 ├── gasmonitor.service
 ├── install.sh
 ├── update.sh
@@ -43,7 +49,7 @@ The installed service stores runtime configuration at `/var/lib/gasmonitor/confi
 - `[hardware]`: I2C, MICS path, framebuffer, display geometry
 - `[network]`: DHCP/static network profile values
 - `[web]`: dashboard port and credentials
-- `[modbus]`: enable flag and TCP port
+- `[modbus]`: enable flag, TCP host/port, read-only policy, client limits, debug, whitelist
 - `[sampling]`: moving-average depth and loop interval
 - `[calibration]`: gas calibration multipliers
 - `[alarms]`: threshold configuration
@@ -57,12 +63,36 @@ On first boot:
 
 ## Modbus Register Map
 
-- `0`: oxygen percent x10
-- `1`: CO ppm x10
-- `2`: NO2 ppm x10
-- `3`: NH3 ppm x10
+GasMonitor exposes an industrial Modbus TCP map compatible with Ignition, Node-RED, and Modbus Poll. Use function code `03` to read holding registers.
+
+| SCADA Address | Request Offset | Description | Format |
+| --- | ---: | --- | --- |
+| `40001` | `0` | Oxygen (%) x10 | `UINT16` |
+| `40002` | `1` | CO (ppm) | `UINT16` |
+| `40003` | `2` | NO2 (ppm x100) | `UINT16` |
+| `40004` | `3` | NH3 (ppm) | `UINT16` |
+| `40005` | `4` | Device status | `UINT16` |
+| `40006` | `5` | Alarm status bitmask | `UINT16` |
+| `40007` | `6` | System state | `UINT16` |
+| `40008` | `7` | Error code | `UINT16` |
+
+Control registers are available only when `[modbus] read_only = false`:
+
+| SCADA Address | Request Offset | Function |
+| --- | ---: | --- |
+| `40100` | `99` | Reset alarms |
+| `40101` | `100` | Reboot device |
+| `40102` | `101` | Force calibration hook |
 
 Default Modbus TCP port is `5020`.
+
+Full SCADA documentation is in [`docs/modbus_register_map.md`](docs/modbus_register_map.md).
+
+Quick test:
+
+```bash
+.venv/bin/python tools/modbus_client.py --host 127.0.0.1 --port 5020
+```
 
 ## Web API
 
@@ -133,12 +163,12 @@ If your ADS1115 address is different, update `mics_address` in `config.ini`.
 
 ## Touchscreen UI
 
-The framebuffer display is designed for landscape `480x320`.
+The framebuffer display is designed for portrait `320x480`.
 
-- First row: Gas Monitor title, branding icon, and status
-- Measurement rows: CO, Oxygen, NH3, NO2
-- Bottom row: IP address and touch menu button
-- Colors: green for normal, yellow for attention, orange for warning, red for alarm/danger
+- Header: device name, status, time
+- Measurement panels: oxygen, CO, NH3, NO2
+- Footer: IP address and touch menu button
+- Colors: green for normal, yellow for warning, red for alarm, gray for inactive or sensor fault
 
 The touch menu can edit the same commissioning values exposed in the web dashboard:
 

@@ -71,6 +71,11 @@ class SharedState:
             self.sensor_faults.pop(sensor_name, None)
             self.status = SystemState.SENSOR_ERROR.value if self.sensor_faults else classify_alarm(self.measurements, self.config)
 
+    def clear_all_sensor_faults(self) -> None:
+        with self.lock:
+            self.sensor_faults.clear()
+            self.status = classify_alarm(self.measurements, self.config)
+
     def set_status(self, status: SystemState | str) -> None:
         with self.lock:
             self.status = status.value if isinstance(status, SystemState) else status

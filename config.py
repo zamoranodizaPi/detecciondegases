@@ -48,7 +48,13 @@ DEFAULT_CONFIG = {
     },
     "modbus": {
         "enabled": "true",
+        "host": "0.0.0.0",
         "port": "5020",
+        "max_clients": "5",
+        "timeout": "10",
+        "read_only": "true",
+        "whitelist": "",
+        "debug": "false",
     },
     "sampling": {
         "samples": "10",
@@ -139,7 +145,13 @@ class RuntimeConfig:
     display_brightness: int
     display_theme: str
     modbus_enabled: bool
+    modbus_host: str
     modbus_port: int
+    modbus_max_clients: int
+    modbus_timeout: int
+    modbus_read_only: bool
+    modbus_whitelist: str
+    modbus_debug: bool
     samples: int
     interval: float
     publish_window: float
@@ -224,6 +236,8 @@ class ConfigManager:
             ("hardware", "touch_invert_x"),
             ("hardware", "touch_invert_y"),
             ("modbus", "enabled"),
+            ("modbus", "read_only"),
+            ("modbus", "debug"),
             ("system", "first_run"),
             ("system", "watchdog_enabled"),
         ):
@@ -241,6 +255,8 @@ class ConfigManager:
             repair("hardware", "display_height", 480)
         bounded_int("web", "port", 8080, 1, 65535)
         bounded_int("modbus", "port", 5020, 1, 65535)
+        bounded_int("modbus", "max_clients", 5, 1, 64)
+        bounded_int("modbus", "timeout", 10, 1, 3600)
         bounded_int("sampling", "samples", 10, 1, 120)
         bounded_int("display", "brightness", 100, 1, 100)
         bounded_int("system", "log_retention_days", 7, 1, 365)
@@ -294,7 +310,13 @@ class ConfigManager:
                 display_brightness=self._parser.getint("display", "brightness"),
                 display_theme=get("display", "theme"),
                 modbus_enabled=self._parser.getboolean("modbus", "enabled"),
+                modbus_host=get("modbus", "host"),
                 modbus_port=self._parser.getint("modbus", "port"),
+                modbus_max_clients=self._parser.getint("modbus", "max_clients"),
+                modbus_timeout=self._parser.getint("modbus", "timeout"),
+                modbus_read_only=self._parser.getboolean("modbus", "read_only"),
+                modbus_whitelist=get("modbus", "whitelist"),
+                modbus_debug=self._parser.getboolean("modbus", "debug"),
                 samples=max(1, self._parser.getint("sampling", "samples")),
                 interval=max(0.2, self._parser.getfloat("sampling", "interval")),
                 publish_window=max(1.0, self._parser.getfloat("sampling", "publish_window")),
