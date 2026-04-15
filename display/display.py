@@ -540,7 +540,7 @@ class FramebufferDisplay:
             candidates,
             self.view,
         )
-        if self.view == "edit" and self._handle_edit_touch(primary_x, primary_y, mapped_x, mapped_y):
+        if self.view == "edit" and self._handle_edit_touch(mapped_x, mapped_y):
             return
         for index, (x, y) in enumerate(candidates):
             if self._dispatch_touch(x, y, index):
@@ -610,17 +610,17 @@ class FramebufferDisplay:
                     return True
         return False
 
-    def _handle_edit_touch(self, x: int, y: int, mapped_x: int, mapped_y: int) -> bool:
-        if mapped_y >= 330 or y >= self.height - 68:
-            if x < 126:
-                LOGGER.info("touch hit editor back hot zone primary")
+    def _handle_edit_touch(self, x: int, y: int) -> bool:
+        if y >= 330:
+            if x <= 115:
+                LOGGER.info("touch hit editor back hot zone direct")
                 self._go("form")
                 return True
-            if x < 192:
-                LOGGER.info("touch hit editor delete hot zone primary")
+            if x <= 225:
+                LOGGER.info("touch hit editor delete hot zone direct")
                 self._delete_key()
                 return True
-            LOGGER.info("touch hit editor ok hot zone primary")
+            LOGGER.info("touch hit editor ok hot zone direct")
             self._save_editor(self.edit_value)
             return True
 
@@ -628,16 +628,16 @@ class FramebufferDisplay:
         if field is None:
             return False
         if field.kind == "choice":
-            index = self._row_index(y, top=96, bottom=330, count=len(field.choices))
+            index = self._row_index(y, top=80, bottom=329, count=len(field.choices))
             if index is not None:
                 value = field.choices[index]
-                LOGGER.info("touch hit choice hot zone %s primary index=%s", value, index)
+                LOGGER.info("touch hit choice hot zone %s direct index=%s", value, index)
                 self._save_editor(value)
                 return True
         if field.kind in ("number", "numeric_text"):
-            key = self._numeric_key_at(x, y)
+            key = self._numeric_key_at_direct(x, y)
             if key is not None:
-                LOGGER.info("touch hit numeric keypad hot zone %s primary", key)
+                LOGGER.info("touch hit numeric keypad hot zone %s direct", key)
                 self._add_key(key)
                 return True
         return False
@@ -684,6 +684,20 @@ class FramebufferDisplay:
         if y < 96 or y > 330 or x < 0 or x > 319:
             return None
         row = max(0, min(int((y - 96) / ((330 - 96) / 4)), 3))
+        col = max(0, min(int(x / (320 / 3)), 2))
+        return keys[row][col]
+
+    @staticmethod
+    def _numeric_key_at_direct(x: int, y: int) -> str | None:
+        keys = (
+            ("1", "2", "3"),
+            ("4", "5", "6"),
+            ("7", "8", "9"),
+            (".", "0", "-"),
+        )
+        if y < 70 or y > 329 or x < 0 or x > 319:
+            return None
+        row = max(0, min(int((y - 70) / ((329 - 70) / 4)), 3))
         col = max(0, min(int(x / (320 / 3)), 2))
         return keys[row][col]
 
