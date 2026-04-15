@@ -50,9 +50,12 @@ class Button:
 
 
 class TouchInput:
-    def __init__(self, width: int, height: int) -> None:
+    def __init__(self, width: int, height: int, fb_width: int, fb_height: int, transform: str) -> None:
         self.width = width
         self.height = height
+        self.fb_width = fb_width
+        self.fb_height = fb_height
+        self.transform = transform
         self.device = self._open_device()
         self.x: int | None = None
         self.y: int | None = None
@@ -87,8 +90,18 @@ class TouchInput:
         return tap
 
     def _scale(self, raw_x: int, raw_y: int) -> tuple[int, int]:
-        x = int(max(0, min(raw_x, self.max_x)) * (self.width - 1) / max(1, self.max_x))
-        y = int(max(0, min(raw_y, self.max_y)) * (self.height - 1) / max(1, self.max_y))
+        x = int(max(0, min(raw_x, self.max_x)) * (self.fb_width - 1) / max(1, self.max_x))
+        y = int(max(0, min(raw_y, self.max_y)) * (self.fb_height - 1) / max(1, self.max_y))
+        if self.transform == "rotate90":
+            return (
+                int((self.fb_height - 1 - y) * (self.width - 1) / max(1, self.fb_height - 1)),
+                int(x * (self.height - 1) / max(1, self.fb_width - 1)),
+            )
+        if (self.fb_width, self.fb_height) != (self.width, self.height):
+            return (
+                int(x * (self.width - 1) / max(1, self.fb_width - 1)),
+                int(y * (self.height - 1) / max(1, self.fb_height - 1)),
+            )
         return x, y
 
     def _load_abs_ranges(self) -> None:
@@ -151,6 +164,7 @@ class FramebufferDisplay:
         self.height = height
         self.rotate = rotate
         self.fb_width, self.fb_height = self._framebuffer_size()
+        self.output_transform = self._output_transform()
         if self.fb_width and self.fb_height and (self.fb_width, self.fb_height) != (self.width, self.height):
             LOGGER.info(
                 "framebuffer geometry is %sx%s; rendering layout remains %sx%s",
@@ -160,7 +174,7 @@ class FramebufferDisplay:
                 self.height,
             )
         self.config_manager = config_manager
-        self.touch = TouchInput(width, height)
+        self.touch = TouchInput(width, height, self.fb_width, self.fb_height, self.output_transform)
         self.view = "home"
         self.section = "alarms"
         self.edit_field: ConfigField | None = None
@@ -218,9 +232,14 @@ class FramebufferDisplay:
         target = (self.fb_width, self.fb_height)
         if image.size == target:
             return image
-        if image.size[::-1] == target:
+        if self.output_transform == "rotate90":
             return image.rotate(90, expand=True)
         return image.resize(target, Image.Resampling.BILINEAR)
+
+    def _output_transform(self) -> str:
+        if (self.fb_width, self.fb_height) == (self.height, self.width):
+            return "rotate90"
+        return "scale"
 
     def _draw_home(self, draw: ImageDraw.ImageDraw, snapshot: dict[str, object]) -> None:
         measurements = snapshot["measurements"]
@@ -231,7 +250,7 @@ class FramebufferDisplay:
             alarms = {}
 
         draw.rectangle((0, 0, self.width, 48), fill=(16, 22, 29))
-        self._draw_brand_icon(draw, 14, 8)
+        self._draw_brand_icon(draw, 8, 4, 42)
         draw.text((58, 8), "Gas Monitor", fill=INK, font=self.font_large)
         draw.text((330, 14), str(snapshot.get("status", "BOOT")), fill=self._status_color(str(snapshot.get("status", ""))), font=self.font_medium)
 
@@ -331,13 +350,31 @@ class FramebufferDisplay:
 
     def _title(self, draw: ImageDraw.ImageDraw, text: str) -> None:
         draw.rectangle((0, 0, self.width, 46), fill=(16, 22, 29))
-        self._draw_brand_icon(draw, 12, 7)
+        self._draw_brand_icon(draw, 10, 6, 34)
         draw.text((56, 9), text, fill=INK, font=self.font_medium)
 
-    def _draw_brand_icon(self, draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
-        draw.rounded_rectangle((x, y, x + 32, y + 32), radius=6, fill=GREEN)
-        draw.ellipse((x + 8, y + 7, x + 24, y + 23), fill=(230, 255, 240))
-        draw.rectangle((x + 14, y + 20, x + 18, y + 28), fill=(230, 255, 240))
+    def _draw_brand_icon(self, draw: ImageDraw.ImageDraw, x: int, y: int, size: int) -> None:
+        left = x + 2
+        top = y + 1
+        right = x + size - 2
+        bottom = y + size - 2
+        mid = x + size // 2
+        draw.polygon(
+            ((mid, top), (right, bottom), (left, bottom)),
+            fill=(80, 137, 31),
+            outline=(178, 222, 72),
+        )
+        inset = max(5, size // 5)
+        draw.polygon(
+            ((mid, top + inset), (right - inset, bottom - inset), (left + inset, bottom - inset)),
+            fill=(12, 28, 18),
+            outline=(124, 171, 55),
+        )
+        small = self._font(max(8, size // 5))
+        label = "SIEZA" if size >= 40 else "S"
+        text_w = self._text_width(draw, label, small)
+        text_h = self._text_height(draw, label, small)
+        draw.text((mid - text_w / 2, y + size * 0.50 - text_h / 2), label, fill=(238, 242, 220), font=small)
 
     def _handle_touch(self) -> None:
         tap = self.touch.read_tap()
