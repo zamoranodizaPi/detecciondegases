@@ -34,6 +34,8 @@ PANEL = (18, 23, 29)
 BLACK = (7, 10, 13)
 LINE = (68, 78, 88)
 TOUCH_HIT_SLOP = 18
+TOUCH_UI_OFFSET_X = -38
+TOUCH_UI_OFFSET_Y = 92
 
 
 @dataclass(frozen=True)
@@ -525,10 +527,11 @@ class FramebufferDisplay:
         tap = self.touch.read_tap()
         if tap is None:
             return
-        x, y = tap
+        mapped_x, mapped_y = tap
+        x, y = self._touch_to_ui(mapped_x, mapped_y)
         self._last_touch_at = time.monotonic()
-        LOGGER.info("touch tap mapped to %s,%s on view %s", x, y, self.view)
-        if self.view == "home" and x >= 180 and y >= 340:
+        LOGGER.info("touch tap mapped to %s,%s ui=%s,%s on view %s", mapped_x, mapped_y, x, y, self.view)
+        if self.view == "home" and x >= 180 and y >= 400:
             LOGGER.info("touch hit home menu hot zone")
             self._go("menu")
             return
@@ -600,6 +603,12 @@ class FramebufferDisplay:
                     self._add_key(key)
                     return True
         return False
+
+    def _touch_to_ui(self, x: int, y: int) -> tuple[int, int]:
+        return (
+            max(0, min(x + TOUCH_UI_OFFSET_X, self.width - 1)),
+            max(0, min(y + TOUCH_UI_OFFSET_Y, self.height - 1)),
+        )
 
     @staticmethod
     def _row_index(y: int, top: int, bottom: int, count: int) -> int | None:
