@@ -128,7 +128,7 @@ sudo ./install.sh
 The installer:
 
 - installs required OS packages
-- enables I2C and SPI when `raspi-config` is present
+- enables SPI and configures a sensor I2C GPIO bus on GPIO20/GPIO21
 - adds the runtime user to `i2c`, `spi`, `video`, and `input`
 - installs the generic 3.5 inch SPI LCD driver from `goodtft/LCD-show` when `/dev/fb1` is not present
 - applies the touchscreen transform through one central mapping layer: `touch_rotation=90`, `touch_swap_xy=true`, `touch_invert_x=false`, `touch_invert_y=true`
@@ -157,6 +157,9 @@ sudo INSTALL_LCD_DRIVER=0 ./install.sh
 
 # Override driver script or rotation if a different board needs it
 sudo LCD_DRIVER_SCRIPT=LCD35-show LCD_ROTATION=0 ./install.sh
+
+# Override the sensor I2C GPIO bus if needed
+sudo I2C_BUS=3 I2C_SDA_GPIO=20 I2C_SCL_GPIO=21 ./install.sh
 ```
 
 The known working display defaults are:
@@ -237,10 +240,11 @@ python3 main.py --config config.ini
 
 - `mock_sensors = true` disables physical sensor reads and shows simulated measurements. Set it to `false` when SEN0322/ADS1115 hardware is connected.
 - MHS-3.5inch RPi Display uses SPI for LCD and touch: GPIO17, GPIO24, GPIO10, GPIO9, GPIO25, GPIO11, GPIO8, and GPIO7.
-- The MHS page marks physical pins 3 and 5 as NC, so sensors stay on the normal Raspberry Pi I2C bus:
-  - SDA: physical pin 3 / GPIO2
-  - SCL: physical pin 5 / GPIO3
-  - `i2c_bus = 1`, exposed as `/dev/i2c-1`
+- Sensor I2C is moved away from physical pins 3 and 5 because the 3.5 inch display blocks that area:
+  - SDA: physical pin 38 / GPIO20
+  - SCL: physical pin 40 / GPIO21
+  - `i2c_bus = 3`, exposed as `/dev/i2c-3`
+  - installer overlay: `dtoverlay=i2c-gpio,bus=3,i2c_gpio_sda=20,i2c_gpio_scl=21`
 - Keep sensor power on 3.3V/GND. Do not power I2C pullups from 5V.
 - SEN0322 oxygen sensor defaults to I2C address `0x73`
 - ADS1115 defaults to I2C address `0x48`

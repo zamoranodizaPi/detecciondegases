@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - allows service to start before depende
 
 DEFAULT_CONFIG = {
     "hardware": {
-        "i2c_bus": "1",
+        "i2c_bus": "3",
         "mock_sensors": "true",
         "oxygen_address": "0x73",
         "mics_enabled": "true",

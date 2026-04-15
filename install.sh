@@ -11,6 +11,10 @@ APP_USER="${APP_USER:-pi}"
 APP_GROUP="${APP_GROUP:-${APP_USER}}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 ENABLE_INTERFACES="${ENABLE_INTERFACES:-1}"
+CONFIG_BOOT_FILE="${CONFIG_BOOT_FILE:-auto}"
+I2C_BUS="${I2C_BUS:-3}"
+I2C_SDA_GPIO="${I2C_SDA_GPIO:-20}"
+I2C_SCL_GPIO="${I2C_SCL_GPIO:-21}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/${APP_NAME}}"
 INSTALL_LCD_DRIVER="${INSTALL_LCD_DRIVER:-auto}"
 LCD_SHOW_REPO="${LCD_SHOW_REPO:-https://github.com/goodtft/LCD-show.git}"
@@ -65,6 +69,43 @@ should_install_lcd_driver() {
   esac
 }
 
+boot_config_file() {
+  if [[ "${CONFIG_BOOT_FILE}" != "auto" ]]; then
+    echo "${CONFIG_BOOT_FILE}"
+    return
+  fi
+  if [[ -f /boot/firmware/config.txt ]]; then
+    echo "/boot/firmware/config.txt"
+  else
+    echo "/boot/config.txt"
+  fi
+}
+
+configure_i2c_gpio_overlay() {
+  local boot_config marker_start marker_end temp_file
+  boot_config="$(boot_config_file)"
+  marker_start="# gasmonitor-i2c-gpio-start"
+  marker_end="# gasmonitor-i2c-gpio-end"
+  mkdir -p "$(dirname "${boot_config}")"
+  touch "${boot_config}"
+  backup_file "${boot_config}"
+  temp_file="$(mktemp)"
+  awk -v start="${marker_start}" -v end="${marker_end}" '
+    $0 == start { skip = 1; next }
+    $0 == end { skip = 0; next }
+    skip != 1 { print }
+  ' "${boot_config}" > "${temp_file}"
+  {
+    cat "${temp_file}"
+    printf '\n%s\n' "${marker_start}"
+    printf 'dtparam=i2c_arm=on\n'
+    printf 'dtoverlay=i2c-gpio,bus=%s,i2c_gpio_sda=%s,i2c_gpio_scl=%s\n' "${I2C_BUS}" "${I2C_SDA_GPIO}" "${I2C_SCL_GPIO}"
+    printf '%s\n' "${marker_end}"
+  } > "${boot_config}"
+  rm -f "${temp_file}"
+  echo "Configured sensor I2C bus /dev/i2c-${I2C_BUS} on GPIO${I2C_SDA_GPIO}/GPIO${I2C_SCL_GPIO} in ${boot_config}"
+}
+
 install_lcd_driver() {
   if ! should_install_lcd_driver; then
     echo "LCD driver install skipped. Set INSTALL_LCD_DRIVER=1 to force it."
@@ -113,6 +154,9 @@ echo "[2/12] Enabling I2C and SPI..."
 if [[ "${ENABLE_INTERFACES}" == "1" ]] && command -v raspi-config >/dev/null 2>&1; then
   raspi-config nonint do_i2c 0 || true
   raspi-config nonint do_spi 0 || true
+fi
+if [[ "${ENABLE_INTERFACES}" == "1" ]]; then
+  configure_i2c_gpio_overlay
 fi
 
 echo "[3/12] Granting hardware access groups..."
@@ -169,6 +213,7 @@ echo "[10/12] Validating display/touch config and auto-repairing runtime config.
 (cd "${INSTALL_DIR}" && "${INSTALL_DIR}/.venv/bin/python" - <<PY
 from config import ConfigManager
 manager = ConfigManager("${CONFIG_PATH}")
+manager.update({"hardware": {"i2c_bus": "${I2C_BUS}"}})
 if "${APPLY_TOUCH_DEFAULTS}" in ("1", "true", "TRUE", "yes", "YES"):
     manager.update({
         "hardware": {
@@ -201,6 +246,9 @@ systemctl enable "${SERVICE_NAME}"
 
 echo "[12/12] Installing LCD driver and starting service..."
 install_lcd_driver
+if [[ "${ENABLE_INTERFACES}" == "1" ]]; then
+  configure_i2c_gpio_overlay
+fi
 systemctl restart "${SERVICE_NAME}"
 
 echo "Installation complete. Check with: sudo systemctl status ${SERVICE_NAME}"
