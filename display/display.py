@@ -528,9 +528,20 @@ class FramebufferDisplay:
         if tap is None:
             return
         mapped_x, mapped_y = tap
+        primary_x, primary_y = self._primary_touch_to_ui(mapped_x, mapped_y)
         candidates = self._touch_candidates(mapped_x, mapped_y)
         self._last_touch_at = time.monotonic()
-        LOGGER.info("touch tap mapped to %s,%s candidates=%s on view %s", mapped_x, mapped_y, candidates, self.view)
+        LOGGER.info(
+            "touch tap mapped to %s,%s primary=%s,%s candidates=%s on view %s",
+            mapped_x,
+            mapped_y,
+            primary_x,
+            primary_y,
+            candidates,
+            self.view,
+        )
+        if self.view == "edit" and self._handle_edit_touch(primary_x, primary_y, mapped_x, mapped_y):
+            return
         for index, (x, y) in enumerate(candidates):
             if self._dispatch_touch(x, y, index):
                 return
@@ -583,18 +594,6 @@ class FramebufferDisplay:
                 return True
 
         if self.view == "edit":
-            if y >= self.height - 68:
-                if x <= 122:
-                    LOGGER.info("touch hit editor back hot zone")
-                    self._go("form")
-                    return True
-                if x <= 248:
-                    LOGGER.info("touch hit editor delete hot zone")
-                    self._delete_key()
-                    return True
-                LOGGER.info("touch hit editor ok hot zone")
-                self._save_editor(self.edit_value)
-                return True
             field = self.edit_field
             if field is not None and field.kind == "choice":
                 index = self._row_index(y, top=96, bottom=self.height - 78, count=len(field.choices))
@@ -610,6 +609,44 @@ class FramebufferDisplay:
                     self._add_key(key)
                     return True
         return False
+
+    def _handle_edit_touch(self, x: int, y: int, mapped_x: int, mapped_y: int) -> bool:
+        if mapped_y >= 330 or y >= self.height - 68:
+            if x < 126:
+                LOGGER.info("touch hit editor back hot zone primary")
+                self._go("form")
+                return True
+            if x < 192:
+                LOGGER.info("touch hit editor delete hot zone primary")
+                self._delete_key()
+                return True
+            LOGGER.info("touch hit editor ok hot zone primary")
+            self._save_editor(self.edit_value)
+            return True
+
+        field = self.edit_field
+        if field is None:
+            return False
+        if field.kind == "choice":
+            index = self._row_index(y, top=96, bottom=330, count=len(field.choices))
+            if index is not None:
+                value = field.choices[index]
+                LOGGER.info("touch hit choice hot zone %s primary index=%s", value, index)
+                self._save_editor(value)
+                return True
+        if field.kind in ("number", "numeric_text"):
+            key = self._numeric_key_at(x, y)
+            if key is not None:
+                LOGGER.info("touch hit numeric keypad hot zone %s primary", key)
+                self._add_key(key)
+                return True
+        return False
+
+    def _primary_touch_to_ui(self, x: int, y: int) -> tuple[int, int]:
+        return (
+            max(0, min(x + TOUCH_UI_OFFSET_X, self.width - 1)),
+            max(0, min(y + TOUCH_UI_OFFSET_Y, self.height - 1)),
+        )
 
     def _touch_candidates(self, x: int, y: int) -> list[tuple[int, int]]:
         candidates = [
@@ -644,9 +681,9 @@ class FramebufferDisplay:
             ("7", "8", "9"),
             (".", "0", "-"),
         )
-        if y < 96 or y > 404 or x < 0 or x > 319:
+        if y < 96 or y > 330 or x < 0 or x > 319:
             return None
-        row = max(0, min(int((y - 96) / ((404 - 96) / 4)), 3))
+        row = max(0, min(int((y - 96) / ((330 - 96) / 4)), 3))
         col = max(0, min(int(x / (320 / 3)), 2))
         return keys[row][col]
 
