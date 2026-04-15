@@ -415,6 +415,10 @@ class FramebufferDisplay:
             return
         x, y = tap
         LOGGER.info("touch tap mapped to %s,%s on view %s", x, y, self.view)
+        if self.view == "home" and x >= 300 and y >= 160:
+            LOGGER.info("touch hit home menu hot zone")
+            self._go("menu")
+            return
         for button in reversed(self.buttons):
             x1, y1, x2, y2 = button.rect
             if x1 <= x <= x2 and y1 <= y <= y2:
