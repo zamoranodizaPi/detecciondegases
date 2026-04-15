@@ -349,7 +349,7 @@ class FramebufferDisplay:
             for choice in field.choices:
                 self._button(draw, (44, y, self.width - 44, y + 48), choice.upper(), lambda value=choice: self._save_editor(value))
                 y += 60
-        elif field.kind == "number":
+        elif field.kind in ("number", "numeric_text"):
             self._draw_numeric_keypad(draw)
         else:
             keys = self._keyboard_keys(field.kind)
