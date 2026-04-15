@@ -129,12 +129,37 @@ The installer:
 - installs required OS packages
 - enables I2C and SPI when `raspi-config` is present
 - adds the runtime user to `i2c`, `spi`, `video`, and `input`
+- stops the existing `gasmonitor.service` when present
+- backs up existing config/service files under `/var/backups/gasmonitor/<timestamp>`
 - copies the application to `/opt/gasmonitor`
 - stores editable runtime configuration in `/var/lib/gasmonitor/config.ini`
+- migrates legacy `/opt/gasmonitor/config.ini` into `/var/lib/gasmonitor/config.ini` when no runtime config exists
+- validates and auto-repairs missing or invalid config keys
 - creates `.venv`
 - installs Python dependencies
 - installs `gasmonitor.service`
 - starts the service
+
+## Migration to a New Raspberry Pi
+
+On a clean system:
+
+```bash
+cd /opt
+sudo git clone https://github.com/zamoranodizaPi/detecciondegases.git gasmonitor
+cd /opt/gasmonitor
+sudo ./install.sh
+```
+
+To migrate an existing configuration, copy your old runtime file before running the installer:
+
+```bash
+sudo mkdir -p /var/lib/gasmonitor
+sudo cp config.ini /var/lib/gasmonitor/config.ini
+sudo ./install.sh
+```
+
+After installation, user-editable settings must live in `/var/lib/gasmonitor/config.ini`. The repository `config.ini` remains only as the default template so Git updates do not overwrite field settings.
 
 ## Manual Run
 
