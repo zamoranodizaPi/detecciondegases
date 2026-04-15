@@ -109,24 +109,33 @@ class TouchInput:
         x = int(max(0, min(raw_x, self.max_x)) * (self.fb_width - 1) / max(1, self.max_x))
         y = int(max(0, min(raw_y, self.max_y)) * (self.fb_height - 1) / max(1, self.max_y))
         original_x, original_y = x, y
+        x_range = self.fb_width
+        y_range = self.fb_height
         if self.swap_xy:
             x, y = y, x
+            x_range, y_range = y_range, x_range
         if self.invert_x:
-            x = self.fb_width - 1 - x
+            x = x_range - 1 - x
         if self.invert_y:
-            y = self.fb_height - 1 - y
+            y = y_range - 1 - y
+        x = max(0, min(x, x_range - 1))
+        y = max(0, min(y, y_range - 1))
         if self.transform == "rotate90":
             mapped = (
-                int((self.fb_height - 1 - y) * (self.width - 1) / max(1, self.fb_height - 1)),
-                int(x * (self.height - 1) / max(1, self.fb_width - 1)),
+                int((y_range - 1 - y) * (self.width - 1) / max(1, y_range - 1)),
+                int(x * (self.height - 1) / max(1, x_range - 1)),
             )
-        elif (self.fb_width, self.fb_height) != (self.width, self.height):
+        elif (x_range, y_range) != (self.width, self.height):
             mapped = (
-                int(x * (self.width - 1) / max(1, self.fb_width - 1)),
-                int(y * (self.height - 1) / max(1, self.fb_height - 1)),
+                int(x * (self.width - 1) / max(1, x_range - 1)),
+                int(y * (self.height - 1) / max(1, y_range - 1)),
             )
         else:
             mapped = (x, y)
+        mapped = (
+            max(0, min(mapped[0], self.width - 1)),
+            max(0, min(mapped[1], self.height - 1)),
+        )
         LOGGER.info("touch raw=%s,%s fb=%s,%s adjusted=%s,%s mapped=%s,%s", raw_x, raw_y, original_x, original_y, x, y, mapped[0], mapped[1])
         return mapped
 
@@ -538,8 +547,10 @@ class FramebufferDisplay:
 
     def _handle_view_hot_zone(self, x: int, y: int) -> bool:
         if self.view == "menu":
-            if 40 <= y <= 330:
+            if 40 <= y <= 380:
                 index = int((y - 58) / 52)
+                if index >= len(self.SECTIONS) and y <= 380:
+                    index = len(self.SECTIONS) - 1
                 if 0 <= index < len(self.SECTIONS):
                     section = self.SECTIONS[index]
                     LOGGER.info("touch hit menu row hot zone %s", section)
