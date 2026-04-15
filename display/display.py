@@ -312,6 +312,10 @@ class FramebufferDisplay:
         self.calibration_samples: list[tuple[int, int, int, int]] = []
         self.calibration_index = 0
         self.calibration_message = ""
+        if runtime is not None:
+            has_calibration = bool(runtime.touch_calibration.strip())
+            if runtime.touch_force_calibration or (runtime.touch_calibrate_on_start and not has_calibration):
+                self._start_calibration()
 
     def render(self, snapshot: dict[str, object]) -> None:
         self._handle_touch()
@@ -701,7 +705,16 @@ class FramebufferDisplay:
         calibration = ",".join(f"{value:.10f}" for value in coefficients)
         LOGGER.info("touch calibration complete coefficients=%s", calibration)
         if self.config_manager is not None:
-            self.config_manager.update({"hardware": {"touch_calibration": calibration, "touch_debug": "false"}})
+            self.config_manager.update(
+                {
+                    "hardware": {
+                        "touch_calibration": calibration,
+                        "touch_debug": "false",
+                        "touch_calibrate_on_start": "false",
+                        "touch_force_calibration": "false",
+                    }
+                }
+            )
         self.touch_config = TouchConfig(
             screen_w=self.width,
             screen_h=self.height,

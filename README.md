@@ -186,14 +186,19 @@ Touch calibration is available from the local display:
 MENU -> CAL TOUCH
 ```
 
-The screen presents 10 targets. Touch the center of each target once. The system stores an affine RAW-to-UI calibration in:
+On a new install, if no calibration is saved yet, the service opens this calibration screen automatically before the normal HMI. The screen presents 10 targets. Touch the center of each target once. The system stores an affine RAW-to-UI calibration in:
 
 ```ini
 [hardware]
 touch_calibration = ax,bx,cx,ay,by,cy
 ```
 
-After calibration, every touch event uses the saved calibration before button hit testing.
+After calibration, every touch event uses the saved calibration before button hit testing. To force calibration again without relying on the menu:
+
+```bash
+sudo sed -i 's|touch_force_calibration = .*|touch_force_calibration = true|' /var/lib/gasmonitor/config.ini
+sudo systemctl restart gasmonitor.service
+```
 
 The LCD driver script may reboot the Raspberry Pi. The installer enables the service before running the LCD driver so `gasmonitor.service` starts after reboot.
 
