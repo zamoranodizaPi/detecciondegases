@@ -180,6 +180,21 @@ touch RAW=(x,y) MAPPED=(x,y)
 BUTTON HIT: true/false
 ```
 
+Touch calibration is available from the local display:
+
+```text
+MENU -> CAL TOUCH
+```
+
+The screen presents 10 targets. Touch the center of each target once. The system stores an affine RAW-to-UI calibration in:
+
+```ini
+[hardware]
+touch_calibration = ax,bx,cx,ay,by,cy
+```
+
+After calibration, every touch event uses the saved calibration before button hit testing.
+
 The LCD driver script may reboot the Raspberry Pi. The installer enables the service before running the LCD driver so `gasmonitor.service` starts after reboot.
 
 ## Migration to a New Raspberry Pi

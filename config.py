@@ -32,6 +32,7 @@ DEFAULT_CONFIG = {
         "touch_invert_x": "false",
         "touch_invert_y": "true",
         "touch_debug": "false",
+        "touch_calibration": "",
     },
     "network": {
         "mode": "dhcp",
@@ -139,6 +140,7 @@ class RuntimeConfig:
     touch_invert_x: bool
     touch_invert_y: bool
     touch_debug: bool
+    touch_calibration: str
     network_mode: str
     static_ip: str
     gateway: str
@@ -310,6 +312,7 @@ class ConfigManager:
                 touch_invert_x=self._parser.getboolean("hardware", "touch_invert_x"),
                 touch_invert_y=self._parser.getboolean("hardware", "touch_invert_y"),
                 touch_debug=self._parser.getboolean("hardware", "touch_debug"),
+                touch_calibration=get("hardware", "touch_calibration"),
                 network_mode=get("network", "mode"),
                 static_ip=get("network", "static_ip"),
                 gateway=get("network", "gateway"),

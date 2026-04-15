@@ -74,6 +74,7 @@ class TouchConfig:
     fb_w: int | None = None
     fb_h: int | None = None
     debug: bool = False
+    calibration: tuple[float, float, float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,13 @@ class TouchInput:
         interacting with UI buttons.
         """
         cfg = self.config
+        if cfg.calibration is not None:
+            ax, bx, cx, ay, by, cy = cfg.calibration
+            mapped_x = self._to_pixel_value(ax * raw_x + bx * raw_y + cx, cfg.screen_w)
+            mapped_y = self._to_pixel_value(ay * raw_x + by * raw_y + cy, cfg.screen_h)
+            LOGGER.info("touch RAW=(%s,%s) MAPPED=(%s,%s) calibration=affine", raw_x, raw_y, mapped_x, mapped_y)
+            return mapped_x, mapped_y
+
         x = self._normalize(raw_x, self.min_x, self.max_x)
         y = self._normalize(raw_y, self.min_y, self.max_y)
 
@@ -180,6 +188,10 @@ class TouchInput:
     @staticmethod
     def _to_pixel(value: float, size: int) -> int:
         return max(0, min(int(round(value * (size - 1))), size - 1))
+
+    @staticmethod
+    def _to_pixel_value(value: float, size: int) -> int:
+        return max(0, min(int(round(value)), size - 1))
 
     def _load_abs_ranges(self) -> None:
         if self.device is None or ecodes is None:
@@ -232,7 +244,19 @@ class FramebufferDisplay:
         ConfigField("alarms", "co_high", "CO alarm", "number"),
     )
 
-    SECTIONS = ("system", "display", "web", "network", "alarms")
+    SECTIONS = ("system", "display", "web", "network", "alarms", "calibrate")
+    CALIBRATION_POINTS: tuple[tuple[int, int], ...] = (
+        (28, 28),
+        (160, 28),
+        (292, 28),
+        (292, 160),
+        (292, 320),
+        (292, 452),
+        (160, 452),
+        (28, 452),
+        (28, 240),
+        (160, 240),
+    )
 
     def __init__(
         self,
@@ -268,6 +292,7 @@ class FramebufferDisplay:
             fb_w=self.fb_width,
             fb_h=self.fb_height,
             debug=runtime.touch_debug if runtime is not None else False,
+            calibration=self._parse_touch_calibration(runtime.touch_calibration if runtime is not None else ""),
         )
         self.touch = TouchInput(self.touch_config)
         self.view = "home"
@@ -284,6 +309,9 @@ class FramebufferDisplay:
         self._blink_on = False
         self._last_touch_at = time.monotonic()
         self._last_touch_point: TouchPoint | None = None
+        self.calibration_samples: list[tuple[int, int, int, int]] = []
+        self.calibration_index = 0
+        self.calibration_message = ""
 
     def render(self, snapshot: dict[str, object]) -> None:
         self._handle_touch()
@@ -302,6 +330,8 @@ class FramebufferDisplay:
             self._draw_form(draw)
         elif self.view == "edit":
             self._draw_editor(draw)
+        elif self.view == "calibrate":
+            self._draw_calibration(draw)
         else:
             status = str(snapshot.get("status", "BOOT"))
             if status in ("BOOT", "WARMUP"):
@@ -448,7 +478,8 @@ class FramebufferDisplay:
         self._title(draw, "Menu")
         y = 62
         for section in self.SECTIONS:
-            self._button(draw, (28, y, self.width - 28, y + 44), section.upper(), lambda s=section: self._open_section(s))
+            label = "CAL TOUCH" if section == "calibrate" else section.upper()
+            self._button(draw, (28, y, self.width - 28, y + 44), label, lambda s=section: self._open_section(s))
             y += 52
         self._button(draw, (28, self.height - 50, 162, self.height - 10), "BACK", lambda: self._go("home"), fill=(70, 77, 85))
 
@@ -527,6 +558,19 @@ class FramebufferDisplay:
                     font=self.font_medium,
                 )
 
+    def _draw_calibration(self, draw: ImageDraw.ImageDraw) -> None:
+        draw.rectangle((0, 0, self.width, self.height), fill=BLACK)
+        self._title(draw, "Touch Cal")
+        index = min(self.calibration_index, len(self.CALIBRATION_POINTS) - 1)
+        x, y = self.CALIBRATION_POINTS[index]
+        draw.text((18, 58), f"Point {index + 1}/10", fill=INK, font=self.font_medium)
+        draw.text((18, 88), "Touch the center of the target", fill=MUTED, font=self.font_small)
+        if self.calibration_message:
+            draw.text((18, 114), self.calibration_message, fill=YELLOW, font=self.font_small)
+        draw.line((x - 18, y, x + 18, y), fill=YELLOW, width=3)
+        draw.line((x, y - 18, x, y + 18), fill=YELLOW, width=3)
+        draw.ellipse((x - 8, y - 8, x + 8, y + 8), outline=RED, width=3)
+
     def _button(
         self,
         draw: ImageDraw.ImageDraw,
@@ -578,6 +622,9 @@ class FramebufferDisplay:
             return
         self._last_touch_point = tap
         self._last_touch_at = time.monotonic()
+        if self.view == "calibrate":
+            self._handle_calibration_touch(tap)
+            return
         LOGGER.info("touch event RAW=(%s,%s) MAPPED=(%s,%s) view=%s", tap.raw_x, tap.raw_y, tap.ui_x, tap.ui_y, self.view)
         hit = False
         for button in reversed(self.buttons):
@@ -592,14 +639,6 @@ class FramebufferDisplay:
                 break
         if not hit:
             LOGGER.info("BUTTON HIT: false buttons=%s", len(self.buttons))
-
-    @staticmethod
-    def _row_index(y: int, top: int, bottom: int, count: int) -> int | None:
-        if count <= 0 or y < top or y > bottom:
-            return None
-        row_height = max(1, (bottom - top) / count)
-        index = int((y - top) / row_height)
-        return max(0, min(index, count - 1))
 
     def _draw_touch_debug(self, draw: ImageDraw.ImageDraw) -> None:
         point = self._last_touch_point
@@ -620,9 +659,121 @@ class FramebufferDisplay:
             self._go("home")
 
     def _open_section(self, section: str) -> None:
+        if section == "calibrate":
+            self._start_calibration()
+            return
         self.section = section
         self.message = ""
         self._go("form")
+
+    def _start_calibration(self) -> None:
+        self.calibration_samples = []
+        self.calibration_index = 0
+        self.calibration_message = "Starting calibration"
+        self.view = "calibrate"
+
+    def _handle_calibration_touch(self, point: TouchPoint) -> None:
+        if self.calibration_index >= len(self.CALIBRATION_POINTS):
+            return
+        target_x, target_y = self.CALIBRATION_POINTS[self.calibration_index]
+        self.calibration_samples.append((point.raw_x, point.raw_y, target_x, target_y))
+        LOGGER.info(
+            "touch calibration sample %s raw=(%s,%s) target=(%s,%s)",
+            self.calibration_index + 1,
+            point.raw_x,
+            point.raw_y,
+            target_x,
+            target_y,
+        )
+        self.calibration_index += 1
+        if self.calibration_index < len(self.CALIBRATION_POINTS):
+            self.calibration_message = f"Captured {self.calibration_index}/10"
+            return
+        self._finish_calibration()
+
+    def _finish_calibration(self) -> None:
+        coefficients = self._solve_touch_affine(self.calibration_samples)
+        if coefficients is None:
+            self.calibration_message = "Calibration failed"
+            LOGGER.error("touch calibration failed")
+            self.view = "menu"
+            return
+        calibration = ",".join(f"{value:.10f}" for value in coefficients)
+        LOGGER.info("touch calibration complete coefficients=%s", calibration)
+        if self.config_manager is not None:
+            self.config_manager.update({"hardware": {"touch_calibration": calibration, "touch_debug": "false"}})
+        self.touch_config = TouchConfig(
+            screen_w=self.width,
+            screen_h=self.height,
+            rotation=self.touch_config.rotation,
+            swap_xy=self.touch_config.swap_xy,
+            invert_x=self.touch_config.invert_x,
+            invert_y=self.touch_config.invert_y,
+            fb_w=self.touch_config.fb_w,
+            fb_h=self.touch_config.fb_h,
+            debug=False,
+            calibration=coefficients,
+        )
+        self.touch.config = self.touch_config
+        self.calibration_message = "Calibration saved"
+        self.view = "home"
+
+    @staticmethod
+    def _solve_touch_affine(samples: list[tuple[int, int, int, int]]) -> tuple[float, float, float, float, float, float] | None:
+        if len(samples) < 3:
+            return None
+
+        def solve(target_index: int) -> tuple[float, float, float] | None:
+            normal = [[0.0, 0.0, 0.0] for _ in range(3)]
+            rhs = [0.0, 0.0, 0.0]
+            for raw_x, raw_y, target_x, target_y in samples:
+                row = [float(raw_x), float(raw_y), 1.0]
+                target = float(target_x if target_index == 2 else target_y)
+                for i in range(3):
+                    rhs[i] += row[i] * target
+                    for j in range(3):
+                        normal[i][j] += row[i] * row[j]
+            return FramebufferDisplay._solve_3x3(normal, rhs)
+
+        x_coefficients = solve(2)
+        y_coefficients = solve(3)
+        if x_coefficients is None or y_coefficients is None:
+            return None
+        return (*x_coefficients, *y_coefficients)
+
+    @staticmethod
+    def _solve_3x3(matrix: list[list[float]], vector: list[float]) -> tuple[float, float, float] | None:
+        augmented = [matrix[i][:] + [vector[i]] for i in range(3)]
+        for column in range(3):
+            pivot = max(range(column, 3), key=lambda row: abs(augmented[row][column]))
+            if abs(augmented[pivot][column]) < 1e-9:
+                return None
+            augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
+            pivot_value = augmented[column][column]
+            for item in range(column, 4):
+                augmented[column][item] /= pivot_value
+            for row in range(3):
+                if row == column:
+                    continue
+                factor = augmented[row][column]
+                for item in range(column, 4):
+                    augmented[row][item] -= factor * augmented[column][item]
+        return (augmented[0][3], augmented[1][3], augmented[2][3])
+
+    @staticmethod
+    def _parse_touch_calibration(value: str) -> tuple[float, float, float, float, float, float] | None:
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            values = tuple(float(item.strip()) for item in text.split(","))
+        except ValueError:
+            LOGGER.warning("invalid touch calibration value: %s", value)
+            return None
+        if len(values) != 6:
+            LOGGER.warning("invalid touch calibration length: %s", value)
+            return None
+        return values
 
     def _open_editor(self, field: ConfigField) -> None:
         self.edit_field = field
