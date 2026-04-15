@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -111,7 +112,7 @@ class TouchInput:
                 name = device.name.lower()
                 if any(token in name for token in ("touch", "ads7846", "xpt2046", "stmpe")):
                     device.grab()
-                    device.set_nonblocking(True)
+                    os.set_blocking(device.fd, False)
                     LOGGER.info("using touchscreen input %s (%s)", device.path, device.name)
                     return device
             except OSError:
