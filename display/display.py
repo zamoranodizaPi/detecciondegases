@@ -540,7 +540,7 @@ class FramebufferDisplay:
             candidates,
             self.view,
         )
-        if self.view == "edit" and self._handle_edit_touch(mapped_x, mapped_y):
+        if self.view == "edit" and self._handle_edit_touch(primary_x, primary_y, mapped_x, mapped_y):
             return
         for index, (x, y) in enumerate(candidates):
             if self._dispatch_touch(x, y, index):
@@ -610,13 +610,13 @@ class FramebufferDisplay:
                     return True
         return False
 
-    def _handle_edit_touch(self, x: int, y: int) -> bool:
-        if y >= 330:
-            if x <= 115:
+    def _handle_edit_touch(self, primary_x: int, primary_y: int, mapped_x: int, mapped_y: int) -> bool:
+        if primary_y >= 400 or mapped_y >= 330:
+            if primary_x <= 125:
                 LOGGER.info("touch hit editor back hot zone direct")
                 self._go("form")
                 return True
-            if x <= 225:
+            if primary_x <= 235:
                 LOGGER.info("touch hit editor delete hot zone direct")
                 self._delete_key()
                 return True
@@ -628,14 +628,14 @@ class FramebufferDisplay:
         if field is None:
             return False
         if field.kind == "choice":
-            index = self._row_index(y, top=80, bottom=329, count=len(field.choices))
+            index = self._row_index(primary_y, top=96, bottom=360, count=len(field.choices))
             if index is not None:
                 value = field.choices[index]
                 LOGGER.info("touch hit choice hot zone %s direct index=%s", value, index)
                 self._save_editor(value)
                 return True
         if field.kind in ("number", "numeric_text"):
-            key = self._numeric_key_at_direct(x, y)
+            key = self._numeric_key_at_direct(primary_x, primary_y, mapped_x, mapped_y)
             if key is not None:
                 LOGGER.info("touch hit numeric keypad hot zone %s direct", key)
                 self._add_key(key)
@@ -688,17 +688,25 @@ class FramebufferDisplay:
         return keys[row][col]
 
     @staticmethod
-    def _numeric_key_at_direct(x: int, y: int) -> str | None:
+    def _numeric_key_at_direct(primary_x: int, primary_y: int, mapped_x: int, mapped_y: int) -> str | None:
         keys = (
             ("1", "2", "3"),
             ("4", "5", "6"),
             ("7", "8", "9"),
             (".", "0", "-"),
         )
+        if mapped_y < 70 or mapped_y > 329:
+            return None
+        if mapped_y < 180:
+            y = primary_y
+            x = primary_x
+        else:
+            y = mapped_y
+            x = mapped_x
         if y < 70 or y > 329 or x < 0 or x > 319:
             return None
         row = max(0, min(int((y - 70) / ((329 - 70) / 4)), 3))
-        col = max(0, min(int(x / (320 / 3)), 2))
+        col = 0 if x < 125 else 1 if x < 220 else 2
         return keys[row][col]
 
     def _apply_inactivity_timeout(self) -> None:
