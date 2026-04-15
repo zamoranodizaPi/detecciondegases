@@ -33,6 +33,7 @@ MUTED = (169, 181, 194)
 PANEL = (18, 23, 29)
 BLACK = (7, 10, 13)
 LINE = (68, 78, 88)
+TOUCH_HIT_SLOP = 18
 
 
 @dataclass(frozen=True)
@@ -524,11 +525,90 @@ class FramebufferDisplay:
             return
         for button in reversed(self.buttons):
             x1, y1, x2, y2 = button.rect
-            if x1 <= x <= x2 and y1 <= y <= y2:
+            if (
+                x1 - TOUCH_HIT_SLOP <= x <= x2 + TOUCH_HIT_SLOP
+                and y1 - TOUCH_HIT_SLOP <= y <= y2 + TOUCH_HIT_SLOP
+            ):
                 LOGGER.info("touch hit button %s", button.label)
                 button.action()
                 return
+        if self._handle_view_hot_zone(x, y):
+            return
         LOGGER.info("touch missed %s buttons", len(self.buttons))
+
+    def _handle_view_hot_zone(self, x: int, y: int) -> bool:
+        if self.view == "menu":
+            if 40 <= y <= 330:
+                index = int((y - 58) / 52)
+                if 0 <= index < len(self.SECTIONS):
+                    section = self.SECTIONS[index]
+                    LOGGER.info("touch hit menu row hot zone %s", section)
+                    self._open_section(section)
+                    return True
+            if y >= self.height - 72 and x <= 190:
+                LOGGER.info("touch hit menu back hot zone")
+                self._go("home")
+                return True
+
+        if self.view == "form":
+            fields = [field for field in self.FIELDS if field.section == self.section]
+            if 44 <= y <= 260:
+                index = int((y - 58) / 48)
+                if 0 <= index < min(4, len(fields)):
+                    field = fields[index]
+                    LOGGER.info("touch hit form row hot zone %s.%s", field.section, field.key)
+                    self._open_editor(field)
+                    return True
+            if y >= self.height - 72 and x <= 180:
+                LOGGER.info("touch hit form back hot zone")
+                self._go("menu")
+                return True
+
+        if self.view == "edit":
+            if y >= self.height - 68:
+                if x <= 122:
+                    LOGGER.info("touch hit editor back hot zone")
+                    self._go("form")
+                    return True
+                if x <= 248:
+                    LOGGER.info("touch hit editor delete hot zone")
+                    self._delete_key()
+                    return True
+                LOGGER.info("touch hit editor ok hot zone")
+                self._save_editor(self.edit_value)
+                return True
+            field = self.edit_field
+            if field is not None and field.kind in ("number", "numeric_text"):
+                key = self._numeric_key_at(x, y)
+                if key is not None:
+                    LOGGER.info("touch hit numeric keypad hot zone %s", key)
+                    self._add_key(key)
+                    return True
+        return False
+
+    @staticmethod
+    def _numeric_key_at(x: int, y: int) -> str | None:
+        keys = (
+            ("1", "2", "3"),
+            ("4", "5", "6"),
+            ("7", "8", "9"),
+            (".", "0", "-"),
+        )
+        key_w = 78
+        key_h = 42
+        gap = 8
+        start_x = 37
+        start_y = 104
+        for row_index, row in enumerate(keys):
+            for col_index, key in enumerate(row):
+                x1 = start_x + col_index * (key_w + gap)
+                y1 = start_y + row_index * (key_h + gap)
+                if (
+                    x1 - TOUCH_HIT_SLOP <= x <= x1 + key_w + TOUCH_HIT_SLOP
+                    and y1 - TOUCH_HIT_SLOP <= y <= y1 + key_h + TOUCH_HIT_SLOP
+                ):
+                    return key
+        return None
 
     def _apply_inactivity_timeout(self) -> None:
         if self.view != "home" and time.monotonic() - self._last_touch_at >= 10:

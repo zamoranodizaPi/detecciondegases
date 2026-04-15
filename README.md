@@ -130,7 +130,7 @@ The installer:
 - enables I2C and SPI when `raspi-config` is present
 - adds the runtime user to `i2c`, `spi`, `video`, and `input`
 - installs the generic 3.5 inch SPI LCD driver from `goodtft/LCD-show` when `/dev/fb1` is not present
-- applies the known working touchscreen mapping: `touch_swap_xy=false`, `touch_invert_x=true`, `touch_invert_y=true`
+- applies the known working touchscreen mapping: `touch_swap_xy=true`, `touch_invert_x=true`, `touch_invert_y=true`
 - stops the existing `gasmonitor.service` when present
 - backs up existing config/service files under `/var/backups/gasmonitor/<timestamp>`
 - copies the application to `/opt/gasmonitor`
@@ -164,7 +164,7 @@ The known working display defaults are:
 - Framebuffer: `/dev/fb1`
 - App geometry: `320x480`
 - App rotation: `0`
-- Touch: `swap_xy=false`, `invert_x=true`, `invert_y=true`
+- Touch: `swap_xy=true`, `invert_x=true`, `invert_y=true`
 
 The LCD driver script may reboot the Raspberry Pi. The installer enables the service before running the LCD driver so `gasmonitor.service` starts after reboot.
 

@@ -27,7 +27,7 @@ DEFAULT_CONFIG = {
         "display_width": "320",
         "display_height": "480",
         "display_rotate": "0",
-        "touch_swap_xy": "false",
+        "touch_swap_xy": "true",
         "touch_invert_x": "true",
         "touch_invert_y": "true",
     },
