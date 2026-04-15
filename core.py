@@ -20,9 +20,11 @@ from display import FramebufferDisplay
 from sensors import Mics6814Sensor, NoisyOxygenReading, OxygenSensor
 from shared_state import SharedState
 from web_server import WebServerThread
+from utils.state_machine import SystemState
 
 
 LOGGER = logging.getLogger(__name__)
+WARMUP_SECONDS = 5.0
 
 
 class ModbusBridge:
@@ -86,6 +88,7 @@ class GasMonitorCore:
         self.modbus = ModbusBridge()
         self.token_store = TokenStore(config_manager)
         self.display = self._build_display(self.runtime)
+        self.started_at = time.monotonic()
         self.oxygen_sensor = self._build_oxygen_sensor(self.runtime)
         self.mics_sensor = self._build_mics_sensor(self.runtime)
         self.measurement_window = MeasurementWindow(self.runtime.publish_window)
@@ -95,11 +98,15 @@ class GasMonitorCore:
             "no2": None,
             "nh3": None,
         }
+        self.sensor_heartbeat = time.monotonic()
+        self.last_alarm_state = ""
 
     def run(self) -> None:
         self._start_thread("sensor-loop", self._sensor_loop)
         self._start_thread("display-loop", self._display_loop)
         self._start_thread("web-api", WebServerThread(self.config_manager, self.state, self.token_store).run)
+        if self.runtime.watchdog_enabled:
+            self._start_thread("watchdog-loop", self._watchdog_loop)
         if self.runtime.modbus_enabled:
             self._start_thread("modbus-server", lambda: self.modbus.serve(self.runtime.modbus_port))
 
@@ -123,6 +130,9 @@ class GasMonitorCore:
             self._apply_runtime_changes(runtime)
             self.state.refresh_config(runtime)
             self.state.set_ip_address(self._get_ip_address())
+            warming_up = time.monotonic() - self.started_at < WARMUP_SECONDS
+            if warming_up:
+                self.state.set_status(SystemState.WARMUP)
 
             if runtime.mock_sensors:
                 measurements = self._mock_measurements()
@@ -155,17 +165,30 @@ class GasMonitorCore:
             for gas, value in filtered.items():
                 self.measurement_window.add_sample(gas, value)
 
-            if self.measurement_window.ready():
+            if self.measurement_window.ready() and not warming_up:
                 published = self.measurement_window.publish(self.last_stable_measurements)
                 self.last_stable_measurements.update(published)
                 self.state.update_measurements(self.last_stable_measurements)
                 self.modbus.update(self.last_stable_measurements)
+                self.sensor_heartbeat = time.monotonic()
+                self.state.mark_sensor_heartbeat(self.sensor_heartbeat)
+                self._log_alarm_transition()
             time.sleep(runtime.interval)
 
     def _display_loop(self) -> None:
         while not self.stop_event.is_set():
             self.display.render(self.state.snapshot())
-            time.sleep(0.2)
+            time.sleep(1.0)
+
+    def _watchdog_loop(self) -> None:
+        while not self.stop_event.is_set():
+            runtime = self.config_manager.runtime()
+            max_age = max(10.0, runtime.interval * 5.0, runtime.publish_window * 2.0)
+            if time.monotonic() - self.sensor_heartbeat > max_age:
+                LOGGER.error("sensor watchdog timeout after %.1fs", max_age)
+                self.state.set_sensor_fault("watchdog", "sensor update timeout")
+                self._trigger_buzzer("watchdog")
+            time.sleep(2.0)
 
     @staticmethod
     def _get_ip_address() -> str:
@@ -222,6 +245,20 @@ class GasMonitorCore:
             "no2": round(random.uniform(0.0, 0.8), 2),
             "nh3": round(random.uniform(0.0, 8.0), 2),
         }
+
+    def _log_alarm_transition(self) -> None:
+        snapshot = self.state.snapshot()
+        status = str(snapshot["status"])
+        if status != self.last_alarm_state:
+            LOGGER.info("system state changed to %s", status)
+            if status in (SystemState.ALARM.value, SystemState.SENSOR_ERROR.value):
+                LOGGER.error("alarm state %s measurements=%s faults=%s", status, snapshot["measurements"], snapshot["sensor_faults"])
+                self._trigger_buzzer(status)
+            self.last_alarm_state = status
+
+    @staticmethod
+    def _trigger_buzzer(reason: str) -> None:
+        LOGGER.warning("buzzer trigger hook: %s", reason)
 
     def _filter_measurements(self, measurements: dict[str, float | None]) -> dict[str, float | None]:
         max_allowed_jump = {

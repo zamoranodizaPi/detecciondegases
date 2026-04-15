@@ -4,3 +4,4 @@ pymodbus==3.8.6
 smbus2==0.4.3
 uvicorn==0.32.0
 evdev==1.7.1
+bcrypt==4.2.1

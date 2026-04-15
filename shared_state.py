@@ -6,18 +6,25 @@ from datetime import datetime
 from typing import Any
 
 from config import RuntimeConfig
+from utils.state_machine import SystemState
 
 
 def classify_alarm(measurements: dict[str, float | None], config: RuntimeConfig) -> str:
     oxygen = measurements.get("oxygen")
     co = measurements.get("co")
     if oxygen is None:
-        return "WAITING"
+        return SystemState.WARMUP.value
     if oxygen < config.oxygen_low or oxygen > config.oxygen_high:
-        return "ALARM"
+        return SystemState.ALARM.value
     if co is not None and co > config.co_high:
-        return "ALARM"
-    return "NORMAL"
+        return SystemState.ALARM.value
+    oxygen_low_warning = config.oxygen_low + max(0.1, (20.9 - config.oxygen_low) * 0.6)
+    oxygen_high_warning = config.oxygen_high - max(0.1, (config.oxygen_high - 20.9) * 0.6)
+    if oxygen <= oxygen_low_warning or oxygen >= oxygen_high_warning:
+        return SystemState.WARNING.value
+    if co is not None and co >= config.co_high * 0.7:
+        return SystemState.WARNING.value
+    return SystemState.NORMAL.value
 
 
 @dataclass
@@ -26,11 +33,12 @@ class SharedState:
     measurements: dict[str, float | None] = field(
         default_factory=lambda: {"oxygen": None, "co": None, "no2": None, "nh3": None}
     )
-    status: str = "BOOT"
+    status: str = SystemState.BOOT.value
     alarms: dict[str, bool] = field(default_factory=dict)
     sensor_faults: dict[str, str] = field(default_factory=dict)
     ip_address: str = "0.0.0.0"
     last_update: str | None = None
+    sensor_updated_at: float | None = None
     config_mode: bool = False
     require_password_change: bool = False
     lock: threading.RLock = field(default_factory=threading.RLock)
@@ -49,19 +57,27 @@ class SharedState:
                 "oxygen_high": self.measurements["oxygen"] is not None and self.measurements["oxygen"] > self.config.oxygen_high,
                 "co_high": self.measurements["co"] is not None and self.measurements["co"] > self.config.co_high,
             }
-            self.status = "FAULT" if self.sensor_faults else classify_alarm(self.measurements, self.config)
+            self.status = SystemState.SENSOR_ERROR.value if self.sensor_faults else classify_alarm(self.measurements, self.config)
             self.last_update = datetime.utcnow().isoformat() + "Z"
 
     def set_sensor_fault(self, sensor_name: str, message: str) -> None:
         with self.lock:
             self.sensor_faults[sensor_name] = message
-            self.status = "FAULT"
+            self.status = SystemState.SENSOR_ERROR.value
             self.last_update = datetime.utcnow().isoformat() + "Z"
 
     def clear_sensor_fault(self, sensor_name: str) -> None:
         with self.lock:
             self.sensor_faults.pop(sensor_name, None)
-            self.status = "FAULT" if self.sensor_faults else classify_alarm(self.measurements, self.config)
+            self.status = SystemState.SENSOR_ERROR.value if self.sensor_faults else classify_alarm(self.measurements, self.config)
+
+    def set_status(self, status: SystemState | str) -> None:
+        with self.lock:
+            self.status = status.value if isinstance(status, SystemState) else status
+
+    def mark_sensor_heartbeat(self, timestamp: float) -> None:
+        with self.lock:
+            self.sensor_updated_at = timestamp
 
     def set_ip_address(self, ip_address: str) -> None:
         with self.lock:
@@ -77,6 +93,7 @@ class SharedState:
                 "sensor_faults": dict(self.sensor_faults),
                 "ip_address": self.ip_address,
                 "last_update": self.last_update,
+                "sensor_updated_at": self.sensor_updated_at,
                 "first_run": self.config.first_run,
                 "config_mode": self.config_mode,
                 "require_password_change": self.require_password_change,

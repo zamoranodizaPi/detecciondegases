@@ -10,6 +10,11 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+try:
+    import bcrypt
+except ImportError:  # pragma: no cover - allows service to start before dependency refresh
+    bcrypt = None
+
 
 DEFAULT_CONFIG = {
     "hardware": {
@@ -19,8 +24,8 @@ DEFAULT_CONFIG = {
         "mics_enabled": "true",
         "mics_address": "0x48",
         "framebuffer": "/dev/fb1",
-        "display_width": "480",
-        "display_height": "320",
+        "display_width": "320",
+        "display_height": "480",
         "display_rotate": "0",
         "touch_swap_xy": "false",
         "touch_invert_x": "true",
@@ -36,6 +41,10 @@ DEFAULT_CONFIG = {
         "port": "8080",
         "username": "admin",
         "password": "admin",
+    },
+    "display": {
+        "brightness": "100",
+        "theme": "dark",
     },
     "modbus": {
         "enabled": "true",
@@ -65,10 +74,13 @@ DEFAULT_CONFIG = {
         "first_run": "true",
         "device_name": "GasMonitor",
         "log_file": "logs/system.log",
+        "watchdog_enabled": "true",
+        "log_retention_days": "7",
     },
 }
 
 PASSWORD_PREFIX = "pbkdf2_sha256"
+BCRYPT_PREFIX = "bcrypt"
 
 
 def ensure_directory(path: Path) -> None:
@@ -76,12 +88,20 @@ def ensure_directory(path: Path) -> None:
 
 
 def hash_password(password: str, iterations: int = 120_000) -> str:
+    if bcrypt is not None:
+        digest = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+        return f"{BCRYPT_PREFIX}${digest}"
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
     return f"{PASSWORD_PREFIX}${iterations}${salt}${digest.hex()}"
 
 
 def verify_password(stored_value: str, provided_password: str) -> bool:
+    if stored_value.startswith(f"{BCRYPT_PREFIX}$"):
+        if bcrypt is None:
+            return False
+        _, digest = stored_value.split("$", 1)
+        return bcrypt.checkpw(provided_password.encode("utf-8"), digest.encode("utf-8"))
     if not stored_value.startswith(f"{PASSWORD_PREFIX}$"):
         return hmac.compare_digest(stored_value, provided_password)
 
@@ -116,6 +136,8 @@ class RuntimeConfig:
     web_port: int
     web_username: str
     web_password: str
+    display_brightness: int
+    display_theme: str
     modbus_enabled: bool
     modbus_port: int
     samples: int
@@ -135,6 +157,8 @@ class RuntimeConfig:
     first_run: bool
     device_name: str
     log_file: str
+    watchdog_enabled: bool
+    log_retention_days: int
 
 
 class ConfigManager:
@@ -162,8 +186,75 @@ class ConfigManager:
                     if not self._parser.has_option(section, key):
                         self._parser.set(section, key, value)
                         changed = True
+            if self._validate_and_repair():
+                changed = True
             if changed:
                 self.save()
+
+    def _validate_and_repair(self) -> bool:
+        changed = False
+
+        def repair(section: str, key: str, value: object) -> None:
+            nonlocal changed
+            self._parser.set(section, key, str(value))
+            changed = True
+
+        def bounded_int(section: str, key: str, default: int, minimum: int, maximum: int) -> None:
+            try:
+                value = self._parser.getint(section, key)
+            except ValueError:
+                repair(section, key, default)
+                return
+            if value < minimum or value > maximum:
+                repair(section, key, min(max(value, minimum), maximum))
+
+        def bounded_float(section: str, key: str, default: float, minimum: float, maximum: float) -> None:
+            try:
+                value = self._parser.getfloat(section, key)
+            except ValueError:
+                repair(section, key, default)
+                return
+            if value < minimum or value > maximum:
+                repair(section, key, min(max(value, minimum), maximum))
+
+        for section, key in (
+            ("hardware", "mock_sensors"),
+            ("hardware", "mics_enabled"),
+            ("hardware", "touch_swap_xy"),
+            ("hardware", "touch_invert_x"),
+            ("hardware", "touch_invert_y"),
+            ("modbus", "enabled"),
+            ("system", "first_run"),
+            ("system", "watchdog_enabled"),
+        ):
+            try:
+                self._parser.getboolean(section, key)
+            except ValueError:
+                repair(section, key, DEFAULT_CONFIG[section][key])
+
+        bounded_int("hardware", "i2c_bus", 1, 0, 10)
+        bounded_int("hardware", "display_width", 320, 160, 1920)
+        bounded_int("hardware", "display_height", 480, 160, 1920)
+        bounded_int("hardware", "display_rotate", 0, 0, 270)
+        bounded_int("web", "port", 8080, 1, 65535)
+        bounded_int("modbus", "port", 5020, 1, 65535)
+        bounded_int("sampling", "samples", 10, 1, 120)
+        bounded_int("display", "brightness", 100, 1, 100)
+        bounded_int("system", "log_retention_days", 7, 1, 365)
+
+        bounded_float("sampling", "interval", 1.0, 0.2, 60.0)
+        bounded_float("sampling", "publish_window", 5.0, 1.0, 300.0)
+        bounded_float("alarms", "oxygen_low", 19.5, 0.0, 100.0)
+        bounded_float("alarms", "oxygen_high", 23.5, 0.0, 100.0)
+        bounded_float("alarms", "co_high", 50.0, 0.0, 10000.0)
+
+        if self._parser.getfloat("alarms", "oxygen_low") >= self._parser.getfloat("alarms", "oxygen_high"):
+            repair("alarms", "oxygen_low", DEFAULT_CONFIG["alarms"]["oxygen_low"])
+            repair("alarms", "oxygen_high", DEFAULT_CONFIG["alarms"]["oxygen_high"])
+
+        if self._parser.get("display", "theme").lower() != "dark":
+            repair("display", "theme", "dark")
+        return changed
 
     def save(self) -> None:
         ensure_directory(self.path)
@@ -197,6 +288,8 @@ class ConfigManager:
                 web_port=self._parser.getint("web", "port"),
                 web_username=get("web", "username"),
                 web_password=get("web", "password"),
+                display_brightness=self._parser.getint("display", "brightness"),
+                display_theme=get("display", "theme"),
                 modbus_enabled=self._parser.getboolean("modbus", "enabled"),
                 modbus_port=self._parser.getint("modbus", "port"),
                 samples=max(1, self._parser.getint("sampling", "samples")),
@@ -216,6 +309,8 @@ class ConfigManager:
                 first_run=self._parser.getboolean("system", "first_run"),
                 device_name=get("system", "device_name"),
                 log_file=get("system", "log_file"),
+                watchdog_enabled=self._parser.getboolean("system", "watchdog_enabled"),
+                log_retention_days=self._parser.getint("system", "log_retention_days"),
             )
 
     def to_dict(self, include_secrets: bool = False) -> dict[str, dict[str, Any]]:
@@ -242,6 +337,7 @@ class ConfigManager:
                             self._parser.set(section, key, hash_password(text))
                         continue
                     self._parser.set(section, key, str(value))
+            self._validate_and_repair()
             self.save()
             return self.runtime()
 

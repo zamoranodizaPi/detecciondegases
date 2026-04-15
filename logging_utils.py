@@ -20,12 +20,13 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=True)
 
 
-def configure_logging(log_path: str) -> None:
+def configure_logging(log_path: str, retention_days: int = 7) -> None:
     path = Path(log_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     formatter = JsonFormatter()
-    file_handler = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=5)
+    backup_count = max(1, min(int(retention_days), 30))
+    file_handler = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=backup_count)
     file_handler.setFormatter(formatter)
 
     stream_handler = logging.StreamHandler()

@@ -30,8 +30,9 @@ ORANGE = (223, 113, 30)
 RED = (202, 48, 49)
 INK = (245, 248, 250)
 MUTED = (169, 181, 194)
-PANEL = (20, 27, 34)
+PANEL = (18, 23, 29)
 BLACK = (7, 10, 13)
+LINE = (68, 78, 88)
 
 
 @dataclass(frozen=True)
@@ -161,9 +162,12 @@ class TouchInput:
 class FramebufferDisplay:
     FIELDS: tuple[ConfigField, ...] = (
         ConfigField("system", "device_name", "Device name"),
+        ConfigField("system", "watchdog_enabled", "Watchdog", "choice", ("true", "false")),
+        ConfigField("system", "log_retention_days", "Log days", "number"),
         ConfigField("web", "port", "Web port", "number"),
         ConfigField("web", "username", "Web user"),
         ConfigField("web", "password", "New password"),
+        ConfigField("display", "brightness", "Brightness", "number"),
         ConfigField("network", "mode", "Network mode", "choice", ("dhcp", "static")),
         ConfigField("network", "static_ip", "Static IP", "numeric_text"),
         ConfigField("network", "gateway", "Gateway", "numeric_text"),
@@ -173,7 +177,7 @@ class FramebufferDisplay:
         ConfigField("alarms", "co_high", "CO alarm", "number"),
     )
 
-    SECTIONS = ("system", "web", "network", "alarms")
+    SECTIONS = ("system", "display", "web", "network", "alarms")
 
     def __init__(
         self,
@@ -216,6 +220,7 @@ class FramebufferDisplay:
         self.message = ""
         self.buttons: list[Button] = []
         self.font_xl = self._font(42)
+        self.font_value = self._font(58)
         self.font_large = self._font(32)
         self.font_medium = self._font(22)
         self.font_small = self._font(16)
@@ -240,7 +245,11 @@ class FramebufferDisplay:
         elif self.view == "edit":
             self._draw_editor(draw)
         else:
-            self._draw_home(draw, snapshot)
+            status = str(snapshot.get("status", "BOOT"))
+            if status in ("BOOT", "WARMUP"):
+                self._draw_startup(draw, snapshot, status)
+            else:
+                self._draw_home(draw, snapshot)
 
         if self.rotate:
             image = image.rotate(self.rotate, expand=True)
@@ -286,33 +295,93 @@ class FramebufferDisplay:
         alarms = snapshot.get("alarms", {})
         if not isinstance(alarms, dict):
             alarms = {}
+        status = str(snapshot.get("status", "BOOT"))
+        alarm_screen = status in ("ALARM", "SENSOR_ERROR")
+        background = (55, 8, 10) if alarm_screen and self._blink_on else BLACK
+        draw.rectangle((0, 0, self.width, self.height), fill=background)
 
-        draw.rectangle((0, 0, self.width, 48), fill=(16, 22, 29))
-        self._draw_brand_icon(draw, 8, 4, 42)
-        draw.text((58, 8), "Gas Monitor", fill=INK, font=self.font_large)
-        draw.text((330, 14), str(snapshot.get("status", "BOOT")), fill=self._status_color(str(snapshot.get("status", ""))), font=self.font_medium)
+        draw.rectangle((0, 0, self.width, 42), fill=(13, 17, 22))
+        self._draw_brand_icon(draw, 8, 5, 30)
+        draw.text((48, 10), str(snapshot.get("device_name", "GasMonitor"))[:14], fill=INK, font=self.font_small)
+        clock = time.strftime("%H:%M")
+        draw.text((250, 10), clock, fill=MUTED, font=self.font_small)
 
-        rows = (
-            ("CO", measurements.get("co"), "ppm", self._gas_color("co", measurements.get("co"), alarms), self._alarm_label("co", measurements.get("co"), alarms)),
-            ("Oxygen", measurements.get("oxygen"), "%", self._gas_color("oxygen", measurements.get("oxygen"), alarms), self._alarm_label("oxygen", measurements.get("oxygen"), alarms)),
-            ("NH3", measurements.get("nh3"), "ppm", self._gas_color("nh3", measurements.get("nh3"), alarms), self._alarm_label("nh3", measurements.get("nh3"), alarms)),
-            ("NO2", measurements.get("no2"), "ppm", self._gas_color("no2", measurements.get("no2"), alarms), self._alarm_label("no2", measurements.get("no2"), alarms)),
+        self._draw_gas_panel(
+            draw,
+            (10, 54, 310, 154),
+            "OXYGEN",
+            measurements.get("oxygen"),
+            "%",
+            self._gas_color("oxygen", measurements.get("oxygen"), alarms),
+            self._alarm_label("oxygen", measurements.get("oxygen"), alarms),
         )
-        y = 48
-        row_h = 54
-        for label, value, unit, color, alarm_label in rows:
-            draw.rectangle((0, y, self.width, y + row_h - 1), fill=color)
-            draw.text((18, y + 10), label, fill=INK, font=self.font_large)
-            text = alarm_label if alarm_label and self._blink_on else self._format_value(value, unit)
-            font = self.font_large if alarm_label and self._blink_on else self.font_xl
-            text_w = self._text_width(draw, text, font)
-            draw.text((self.width - text_w - 18, y + 4), text, fill=INK, font=font)
-            y += row_h
+        self._draw_gas_panel(
+            draw,
+            (10, 166, 310, 266),
+            "CO",
+            measurements.get("co"),
+            "ppm",
+            self._gas_color("co", measurements.get("co"), alarms),
+            self._alarm_label("co", measurements.get("co"), alarms),
+        )
 
-        draw.rectangle((0, y, self.width, self.height), fill=(15, 20, 26))
+        self._draw_small_gas(draw, (10, 278, 154, 334), "NO2", measurements.get("no2"), "ppm", self._gas_color("no2", measurements.get("no2"), alarms))
+        self._draw_small_gas(draw, (166, 278, 310, 334), "NH3", measurements.get("nh3"), "ppm", self._gas_color("nh3", measurements.get("nh3"), alarms))
+
+        status_color = self._status_color(status)
+        draw.rectangle((10, 348, 310, 390), fill=(14, 19, 24), outline=status_color, width=2)
+        draw.text((22, 359), f"STATUS: {status}", fill=status_color, font=self.font_medium)
+
         ip_address = str(snapshot.get("ip_address", "0.0.0.0"))
-        draw.text((16, y + 14), f"IP {ip_address}", fill=MUTED, font=self.font_small)
-        self._button(draw, (330, y + 8, 466, self.height - 8), "MENU", lambda: self._go("menu"), fill=(35, 87, 125))
+        draw.rectangle((10, 402, 310, 438), fill=(14, 19, 24), outline=LINE)
+        draw.text((22, 412), f"IP: {ip_address}", fill=INK, font=self.font_small)
+        self._button(draw, (196, 444, 310, 474), "MENU", lambda: self._go("menu"), fill=(37, 49, 62), font=self.font_small)
+
+    def _draw_startup(self, draw: ImageDraw.ImageDraw, snapshot: dict[str, object], status: str) -> None:
+        draw.rectangle((0, 0, self.width, self.height), fill=BLACK)
+        self._draw_brand_icon(draw, 125, 48, 70)
+        title = "Gas Monitor v1.0"
+        title_w = self._text_width(draw, title, self.font_medium)
+        draw.text(((self.width - title_w) / 2, 145), title, fill=INK, font=self.font_medium)
+        message = "Initializing sensors..." if status == "WARMUP" else "Starting system..."
+        msg_w = self._text_width(draw, message, self.font_small)
+        draw.text(((self.width - msg_w) / 2, 205), message, fill=YELLOW, font=self.font_small)
+        ip_text = f"IP: {snapshot.get('ip_address', '0.0.0.0')}"
+        ip_w = self._text_width(draw, ip_text, self.font_small)
+        draw.text(((self.width - ip_w) / 2, 245), ip_text, fill=MUTED, font=self.font_small)
+
+    def _draw_gas_panel(
+        self,
+        draw: ImageDraw.ImageDraw,
+        rect: tuple[int, int, int, int],
+        label: str,
+        value: object,
+        unit: str,
+        color: Color,
+        alarm_label: str,
+    ) -> None:
+        x1, y1, x2, y2 = rect
+        border = color if value is not None else (90, 96, 104)
+        draw.rectangle(rect, fill=PANEL, outline=border, width=2)
+        draw.text((x1 + 12, y1 + 9), f"{label} ({unit})", fill=MUTED, font=self.font_small)
+        if alarm_label and self._blink_on:
+            text = alarm_label
+            font = self.font_large
+            fill = RED
+        else:
+            text = "--" if value is None else str(value)
+            font = self.font_value
+            fill = INK if value is not None else MUTED
+        text_w = self._text_width(draw, text, font)
+        draw.text((x2 - text_w - 14, y1 + 34), text, fill=fill, font=font)
+
+    def _draw_small_gas(self, draw: ImageDraw.ImageDraw, rect: tuple[int, int, int, int], label: str, value: object, unit: str, color: Color) -> None:
+        x1, y1, x2, y2 = rect
+        draw.rectangle(rect, fill=PANEL, outline=color, width=2)
+        draw.text((x1 + 10, y1 + 8), label, fill=MUTED, font=self.font_small)
+        text = self._format_value(value, unit)
+        text_w = self._text_width(draw, text, self.font_small)
+        draw.text((x2 - text_w - 10, y1 + 30), text, fill=INK if value is not None else MUTED, font=self.font_small)
 
     def _draw_menu(self, draw: ImageDraw.ImageDraw) -> None:
         self._title(draw, "Menu")
@@ -379,10 +448,10 @@ class FramebufferDisplay:
             ("7", "8", "9"),
             (".", "0", "-"),
         )
-        key_w = 92
-        key_h = 34
+        key_w = 78
+        key_h = 42
         gap = 8
-        start_x = 96
+        start_x = 37
         start_y = 104
         for row_index, row in enumerate(keys):
             for col_index, key in enumerate(row):
@@ -449,7 +518,7 @@ class FramebufferDisplay:
         x, y = tap
         self._last_touch_at = time.monotonic()
         LOGGER.info("touch tap mapped to %s,%s on view %s", x, y, self.view)
-        if self.view == "home" and x >= 240 and y >= 80:
+        if self.view == "home" and x >= 180 and y >= 400:
             LOGGER.info("touch hit home menu hot zone")
             self._go("menu")
             return
@@ -557,9 +626,9 @@ class FramebufferDisplay:
     def _status_color(status: str) -> Color:
         if status == "NORMAL":
             return GREEN
-        if status == "ALARM":
+        if status in ("ALARM", "SENSOR_ERROR"):
             return RED
-        if status == "WAITING":
+        if status in ("WARNING", "WARMUP", "BOOT"):
             return YELLOW
         return ORANGE
 

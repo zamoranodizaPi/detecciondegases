@@ -31,6 +31,13 @@ function fillConfig(config) {
   document.getElementById("oxygenLow").value = config.alarms.oxygen_low || 19.5;
   document.getElementById("oxygenHigh").value = config.alarms.oxygen_high || 23.5;
   document.getElementById("coHigh").value = config.alarms.co_high || 50;
+  document.getElementById("displayBrightness").value = config.display?.brightness || 100;
+  document.getElementById("watchdogEnabled").value = config.system.watchdog_enabled || "true";
+  document.getElementById("logRetentionDays").value = config.system.log_retention_days || 7;
+}
+
+function normalizeStatus(status) {
+  return String(status || "BOOT").toLowerCase();
 }
 
 async function refreshConfig() {
@@ -42,13 +49,14 @@ async function refreshMeasurements() {
   const data = await api("/api/measurements");
   const statusEl = document.getElementById("statusText");
   statusEl.textContent = data.status;
-  statusEl.className = `value status-${String(data.status).toLowerCase()}`;
-  setText("metaText", `${data.device_name} | IP ${data.ip_address} | Updated ${data.last_update || "--"}`);
+  statusEl.className = `status-pill status-${normalizeStatus(data.status)}`;
+  setText("deviceTitle", data.device_name || "GASMONITOR");
+  setText("metaText", `IP ${data.ip_address} | Updated ${data.last_update || "--"}`);
   setText("oxygenValue", data.measurements.oxygen ?? "--");
   setText("coValue", data.measurements.co ?? "--");
   setText("no2Value", data.measurements.no2 ?? "--");
   setText("nh3Value", data.measurements.nh3 ?? "--");
-  setText("alarmText", JSON.stringify({ alarms: data.alarms, faults: data.sensor_faults }));
+  setText("alarmText", JSON.stringify({ alarms: data.alarms, faults: data.sensor_faults }, null, 2));
   if (data.require_password_change) {
     setText("configMessage", "First run active. Set a new password before leaving configuration mode.");
   }
@@ -77,6 +85,12 @@ async function saveConfig() {
   const payload = {
     system: {
       device_name: document.getElementById("deviceName").value,
+      watchdog_enabled: document.getElementById("watchdogEnabled").value,
+      log_retention_days: document.getElementById("logRetentionDays").value,
+    },
+    display: {
+      brightness: document.getElementById("displayBrightness").value,
+      theme: "dark",
     },
     web: {
       port: document.getElementById("webPort").value,

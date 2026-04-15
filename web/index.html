@@ -3,115 +3,163 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GasMonitor</title>
+  <title>GasMonitor HMI</title>
   <style>
     :root {
-      --bg: #0f1720;
-      --panel: #16222d;
-      --accent: #4ade80;
-      --warn: #f59e0b;
-      --alarm: #ef4444;
-      --text: #e5eef5;
-      --muted: #9db0c2;
+      --bg: #070a0d;
+      --panel: #10161c;
+      --panel-2: #151d25;
+      --line: #37414b;
+      --text: #f2f5f7;
+      --muted: #9aa7b3;
+      --normal: #169b5c;
+      --warning: #d6b729;
+      --alarm: #ca3031;
+      --fault: #7b838c;
     }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "DejaVu Sans", sans-serif;
-      background: radial-gradient(circle at top, #1b2937, var(--bg));
+      background: var(--bg);
       color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
     }
     .wrap {
-      max-width: 980px;
+      max-width: 1180px;
       margin: 0 auto;
-      padding: 24px;
+      padding: 20px;
     }
-    .panel {
-      background: rgba(22, 34, 45, 0.95);
-      border: 1px solid rgba(157, 176, 194, 0.15);
-      border-radius: 16px;
-      padding: 18px;
-      margin-bottom: 18px;
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+      margin-bottom: 16px;
     }
+    .brand { font-size: 1.45rem; font-weight: 800; letter-spacing: 0.06em; }
+    .status-pill {
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+    .status-normal { color: var(--normal); border-color: var(--normal); }
+    .status-warning, .status-warmup, .status-boot { color: var(--warning); border-color: var(--warning); }
+    .status-alarm { color: var(--alarm); border-color: var(--alarm); }
+    .status-sensor_error { color: var(--fault); border-color: var(--fault); }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
       gap: 12px;
     }
-    .value {
-      font-size: 2rem;
-      font-weight: 700;
+    .card, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px;
     }
-    .muted {
+    .label { color: var(--muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; }
+    .value { font-size: 2.6rem; font-weight: 900; margin-top: 10px; }
+    .unit { color: var(--muted); font-size: 1rem; }
+    .meta {
       color: var(--muted);
+      display: grid;
+      gap: 6px;
+      margin: 16px 0;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 14px;
+      margin-top: 14px;
     }
     input, select, button {
       width: 100%;
-      box-sizing: border-box;
       margin-top: 6px;
       margin-bottom: 12px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(157, 176, 194, 0.2);
-      background: #0d141b;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #090d12;
       color: var(--text);
     }
     button {
-      background: linear-gradient(135deg, #1f7a48, #155e75);
+      background: #1f3342;
+      border-color: #456070;
       cursor: pointer;
-      border: none;
+      font-weight: 800;
     }
-    .status-normal { color: var(--accent); }
-    .status-alarm { color: var(--alarm); }
-    .status-fault { color: var(--warn); }
-    .status-waiting { color: var(--muted); }
     .hidden { display: none; }
+    .faults { white-space: pre-wrap; color: var(--warning); }
+    @media (max-width: 900px) {
+      .grid, .layout { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div id="loginPanel" class="panel">
-      <h2>GasMonitor Login</h2>
+      <div class="brand">GASMONITOR HMI</div>
+      <p class="label">Authentication Required</p>
       <label>Username <input id="username" value="admin"></label>
       <label>Password <input id="password" type="password" value="admin"></label>
-      <button id="loginBtn">Login</button>
-      <div id="loginMessage" class="muted"></div>
+      <button id="loginBtn">LOGIN</button>
+      <div id="loginMessage" class="faults"></div>
     </div>
 
     <div id="appPanel" class="hidden">
-      <div class="panel">
-        <h2>Live Monitoring</h2>
-        <div id="statusText" class="value">BOOT</div>
-        <div id="metaText" class="muted"></div>
-        <div class="grid">
-          <div class="panel"><div class="muted">Oxygen</div><div id="oxygenValue" class="value">--</div></div>
-          <div class="panel"><div class="muted">CO</div><div id="coValue" class="value">--</div></div>
-          <div class="panel"><div class="muted">NO2</div><div id="no2Value" class="value">--</div></div>
-          <div class="panel"><div class="muted">NH3</div><div id="nh3Value" class="value">--</div></div>
+      <div class="topbar">
+        <div>
+          <div class="brand" id="deviceTitle">GASMONITOR</div>
+          <div class="meta" id="metaText"></div>
         </div>
-        <div id="alarmText" class="muted"></div>
+        <div id="statusText" class="status-pill status-boot">BOOT</div>
       </div>
 
-      <div class="panel">
-        <h2>Configuration</h2>
-        <div id="configMessage" class="muted"></div>
-        <label>Device Name <input id="deviceName"></label>
-        <label>Web Port <input id="webPort" type="number"></label>
-        <label>Network Mode
-          <select id="networkMode">
-            <option value="dhcp">DHCP</option>
-            <option value="static">Static</option>
-          </select>
-        </label>
-        <label>Static IP <input id="staticIp"></label>
-        <label>Gateway <input id="gateway"></label>
-        <label>DNS <input id="dns"></label>
-        <label>Low Oxygen Alarm <input id="oxygenLow" type="number" step="0.1"></label>
-        <label>High Oxygen Alarm <input id="oxygenHigh" type="number" step="0.1"></label>
-        <label>CO Alarm <input id="coHigh" type="number" step="1"></label>
-        <label>New Password <input id="newPassword" type="password" placeholder="Leave blank to keep current"></label>
-        <button id="saveConfigBtn">Save Configuration</button>
-        <button id="rebootBtn">Reboot Device</button>
+      <div class="grid">
+        <div class="card"><div class="label">Oxygen</div><div class="value"><span id="oxygenValue">--</span> <span class="unit">%</span></div></div>
+        <div class="card"><div class="label">CO</div><div class="value"><span id="coValue">--</span> <span class="unit">ppm</span></div></div>
+        <div class="card"><div class="label">NO2</div><div class="value"><span id="no2Value">--</span> <span class="unit">ppm</span></div></div>
+        <div class="card"><div class="label">NH3</div><div class="value"><span id="nh3Value">--</span> <span class="unit">ppm</span></div></div>
+      </div>
+
+      <div class="layout">
+        <div class="panel">
+          <div class="label">Alarms and Faults</div>
+          <div id="alarmText" class="faults"></div>
+        </div>
+
+        <div class="panel">
+          <div class="label">Configuration</div>
+          <div id="configMessage" class="faults"></div>
+          <label>Device Name <input id="deviceName"></label>
+          <label>Web Port <input id="webPort" type="number"></label>
+          <label>Network Mode
+            <select id="networkMode">
+              <option value="dhcp">DHCP</option>
+              <option value="static">Static</option>
+            </select>
+          </label>
+          <label>Static IP <input id="staticIp"></label>
+          <label>Gateway <input id="gateway"></label>
+          <label>DNS <input id="dns"></label>
+          <label>Low Oxygen Alarm <input id="oxygenLow" type="number" step="0.1"></label>
+          <label>High Oxygen Alarm <input id="oxygenHigh" type="number" step="0.1"></label>
+          <label>CO Alarm <input id="coHigh" type="number" step="1"></label>
+          <label>Display Brightness <input id="displayBrightness" type="number" min="1" max="100"></label>
+          <label>Watchdog
+            <select id="watchdogEnabled">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </label>
+          <label>Log Retention Days <input id="logRetentionDays" type="number" min="1" max="365"></label>
+          <label>New Password <input id="newPassword" type="password" placeholder="Required on first run"></label>
+          <button id="saveConfigBtn">SAVE CONFIGURATION</button>
+          <button id="rebootBtn">REBOOT DEVICE</button>
+        </div>
       </div>
     </div>
   </div>

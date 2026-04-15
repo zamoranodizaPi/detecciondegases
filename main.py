@@ -18,7 +18,7 @@ def main() -> int:
 
     config_manager = ConfigManager(args.config)
     runtime = config_manager.runtime()
-    configure_logging(runtime.log_file)
+    configure_logging(runtime.log_file, runtime.log_retention_days)
     logging.info("starting gas monitor service")
 
     core = GasMonitorCore(config_manager)
