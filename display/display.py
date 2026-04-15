@@ -191,8 +191,8 @@ class FramebufferDisplay:
 
         try:
             with fb_path.open("wb") as handle:
-                handle.write(image.convert("RGB").tobytes("raw", "BGR;16"))
-        except OSError as exc:
+                handle.write(self._to_rgb565(image))
+        except (OSError, ValueError) as exc:
             LOGGER.warning("display render failed: %s", exc)
 
     def _draw_home(self, draw: ImageDraw.ImageDraw, snapshot: dict[str, object]) -> None:
@@ -380,6 +380,15 @@ class FramebufferDisplay:
         if value is None:
             return "--"
         return f"{value} {suffix}"
+
+    @staticmethod
+    def _to_rgb565(image: Image.Image) -> bytes:
+        data = bytearray()
+        for red, green, blue in image.convert("RGB").getdata():
+            value = ((red & 0xF8) << 8) | ((green & 0xFC) << 3) | (blue >> 3)
+            data.append(value & 0xFF)
+            data.append((value >> 8) & 0xFF)
+        return bytes(data)
 
     @staticmethod
     def _font(size: int) -> ImageFont.ImageFont:
