@@ -565,7 +565,7 @@ class FramebufferDisplay:
                 self._go("menu")
                 return True
             visible_count = min(4, len(fields))
-            index = self._row_index(y, top=46, bottom=280, count=visible_count)
+            index = self._row_index(y, top=46, bottom=self.height - 78, count=visible_count)
             if index is not None:
                 field = fields[index]
                 LOGGER.info("touch hit form row hot zone %s.%s index=%s", field.section, field.key, index)
@@ -587,7 +587,7 @@ class FramebufferDisplay:
                 return True
             field = self.edit_field
             if field is not None and field.kind == "choice":
-                index = self._row_index(y, top=100, bottom=300, count=len(field.choices))
+                index = self._row_index(y, top=96, bottom=self.height - 78, count=len(field.choices))
                 if index is not None:
                     value = field.choices[index]
                     LOGGER.info("touch hit choice hot zone %s index=%s", value, index)
@@ -617,21 +617,11 @@ class FramebufferDisplay:
             ("7", "8", "9"),
             (".", "0", "-"),
         )
-        key_w = 78
-        key_h = 42
-        gap = 8
-        start_x = 37
-        start_y = 104
-        for row_index, row in enumerate(keys):
-            for col_index, key in enumerate(row):
-                x1 = start_x + col_index * (key_w + gap)
-                y1 = start_y + row_index * (key_h + gap)
-                if (
-                    x1 - TOUCH_HIT_SLOP <= x <= x1 + key_w + TOUCH_HIT_SLOP
-                    and y1 - TOUCH_HIT_SLOP <= y <= y1 + key_h + TOUCH_HIT_SLOP
-                ):
-                    return key
-        return None
+        if y < 96 or y > 404 or x < 0 or x > 319:
+            return None
+        row = max(0, min(int((y - 96) / ((404 - 96) / 4)), 3))
+        col = max(0, min(int(x / (320 / 3)), 2))
+        return keys[row][col]
 
     def _apply_inactivity_timeout(self) -> None:
         if self.view != "home" and time.monotonic() - self._last_touch_at >= 10:
