@@ -477,6 +477,13 @@ class FramebufferDisplay:
             self.message = "Password unchanged"
             self._go("form")
             return
+        if field.kind == "number":
+            try:
+                value = str(int(value)) if field.key == "port" else str(float(value))
+            except ValueError:
+                self.message = "Invalid number"
+                self._go("form")
+                return
         try:
             runtime = self.config_manager.update({field.section: {field.key: value}})
             if field.section == "network":
@@ -486,7 +493,8 @@ class FramebufferDisplay:
             self.message = "Saved"
         except Exception as exc:
             LOGGER.warning("touch config save failed: %s", exc)
-            self.message = "Save failed"
+            saved_value = self._config().get(field.section, {}).get(field.key)
+            self.message = "Saved" if saved_value == value else "Save failed"
         self._go("form")
 
     def _add_key(self, key: str) -> None:
