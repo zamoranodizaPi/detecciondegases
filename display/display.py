@@ -282,6 +282,7 @@ class FramebufferDisplay:
             )
         self.config_manager = config_manager
         runtime = self.config_manager.runtime() if self.config_manager is not None else None
+        self.inactivity_timeout = runtime.display_inactivity_timeout if runtime is not None else 60
         self.touch_config = TouchConfig(
             screen_w=width,
             screen_h=height,
@@ -434,16 +435,17 @@ class FramebufferDisplay:
 
     def _draw_startup(self, draw: ImageDraw.ImageDraw, snapshot: dict[str, object], status: str) -> None:
         draw.rectangle((0, 0, self.width, self.height), fill=BLACK)
-        self._draw_brand_icon(draw, 125, 48, 70)
+        logo_size = min(self.width - 24, 296)
+        self._draw_brand_icon(draw, (self.width - logo_size) // 2, 18, logo_size)
         title = "Gas Monitor v1.0"
         title_w = self._text_width(draw, title, self.font_medium)
-        draw.text(((self.width - title_w) / 2, 145), title, fill=INK, font=self.font_medium)
+        draw.text(((self.width - title_w) / 2, 318), title, fill=INK, font=self.font_medium)
         message = "Initializing sensors..." if status == "WARMUP" else "Starting system..."
         msg_w = self._text_width(draw, message, self.font_small)
-        draw.text(((self.width - msg_w) / 2, 205), message, fill=YELLOW, font=self.font_small)
+        draw.text(((self.width - msg_w) / 2, 372), message, fill=YELLOW, font=self.font_small)
         ip_text = f"IP: {snapshot.get('ip_address', '0.0.0.0')}"
         ip_w = self._text_width(draw, ip_text, self.font_small)
-        draw.text(((self.width - ip_w) / 2, 245), ip_text, fill=MUTED, font=self.font_small)
+        draw.text(((self.width - ip_w) / 2, 412), ip_text, fill=MUTED, font=self.font_small)
 
     def _draw_gas_panel(
         self,
@@ -620,6 +622,27 @@ class FramebufferDisplay:
         text_w = self._text_width(draw, label, small)
         text_h = self._text_height(draw, label, small)
         draw.text((mid - text_w / 2, y + size * 0.50 - text_h / 2), label, fill=(238, 242, 220), font=small)
+        if size >= 120:
+            line_color = (214, 232, 142)
+            center_top = (mid, top + int(size * 0.24))
+            center_bottom = (mid, bottom - int(size * 0.23))
+            draw.line((center_top, center_bottom), fill=line_color, width=max(2, size // 70))
+            left_wave = [
+                (x + int(size * 0.22), y + int(size * 0.70)),
+                (x + int(size * 0.30), y + int(size * 0.64)),
+                (x + int(size * 0.36), y + int(size * 0.70)),
+                (x + int(size * 0.42), y + int(size * 0.64)),
+                (x + int(size * 0.50), y + int(size * 0.71)),
+            ]
+            right_wave = [
+                (x + int(size * 0.50), y + int(size * 0.71)),
+                (x + int(size * 0.58), y + int(size * 0.64)),
+                (x + int(size * 0.64), y + int(size * 0.70)),
+                (x + int(size * 0.70), y + int(size * 0.64)),
+                (x + int(size * 0.78), y + int(size * 0.70)),
+            ]
+            draw.line(left_wave, fill=line_color, width=max(2, size // 65))
+            draw.line(right_wave, fill=line_color, width=max(2, size // 65))
 
     def _handle_touch(self) -> None:
         tap = self.touch.read_tap()
@@ -659,7 +682,7 @@ class FramebufferDisplay:
         draw.text((8, self.height - 20), debug, fill=YELLOW, font=self.font_small)
 
     def _apply_inactivity_timeout(self) -> None:
-        if self.view != "home" and time.monotonic() - self._last_touch_at >= 10:
+        if self.view != "home" and time.monotonic() - self._last_touch_at >= self.inactivity_timeout:
             LOGGER.info("touchscreen inactivity timeout; returning home")
             self._go("home")
 

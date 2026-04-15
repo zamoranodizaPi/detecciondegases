@@ -49,6 +49,7 @@ The installed service stores runtime configuration at `/var/lib/gasmonitor/confi
 - `[hardware]`: I2C, MICS path, framebuffer, display geometry
 - `[network]`: DHCP/static network profile values
 - `[web]`: dashboard port and credentials
+- `[display]`: brightness, dark theme, local HMI inactivity timeout
 - `[modbus]`: enable flag, TCP host/port, read-only policy, client limits, debug, whitelist
 - `[sampling]`: moving-average depth and loop interval
 - `[calibration]`: gas calibration multipliers

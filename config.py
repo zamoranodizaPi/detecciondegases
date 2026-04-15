@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     "display": {
         "brightness": "100",
         "theme": "dark",
+        "inactivity_timeout": "60",
     },
     "modbus": {
         "enabled": "true",
@@ -154,6 +155,7 @@ class RuntimeConfig:
     web_password: str
     display_brightness: int
     display_theme: str
+    display_inactivity_timeout: int
     modbus_enabled: bool
     modbus_host: str
     modbus_port: int
@@ -273,6 +275,7 @@ class ConfigManager:
         bounded_int("modbus", "timeout", 10, 1, 3600)
         bounded_int("sampling", "samples", 10, 1, 120)
         bounded_int("display", "brightness", 100, 1, 100)
+        bounded_int("display", "inactivity_timeout", 60, 10, 600)
         bounded_int("system", "log_retention_days", 7, 1, 365)
 
         bounded_float("sampling", "interval", 1.0, 0.2, 60.0)
@@ -328,6 +331,7 @@ class ConfigManager:
                 web_password=get("web", "password"),
                 display_brightness=self._parser.getint("display", "brightness"),
                 display_theme=get("display", "theme"),
+                display_inactivity_timeout=self._parser.getint("display", "inactivity_timeout"),
                 modbus_enabled=self._parser.getboolean("modbus", "enabled"),
                 modbus_host=get("modbus", "host"),
                 modbus_port=self._parser.getint("modbus", "port"),
