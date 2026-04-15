@@ -533,9 +533,10 @@ class FramebufferDisplay:
                 label = "SP" if key == " " else key
                 self._button(draw, (x, y, x + key_w, y + key_h), label, lambda k=key: self._add_key(k), fill=(37, 49, 62), font=self.font_small)
                 x += key_w + 6
-        self._button(draw, (16, self.height - 44, 112, self.height - 8), "BACK", lambda: self._go("form"), fill=(70, 77, 85))
-        self._button(draw, (126, self.height - 44, 238, self.height - 8), "DEL", self._delete_key, fill=ORANGE)
-        self._button(draw, (self.width - 128, self.height - 44, self.width - 16, self.height - 8), "OK", lambda: self._save_editor(self.edit_value), fill=GREEN)
+        control_y = self.height - 46
+        self._button(draw, (16, control_y, 94, self.height - 8), "<", lambda: self._go("form"), fill=(70, 77, 85))
+        self._button(draw, (108, control_y, 202, self.height - 8), "DEL", self._delete_key, fill=ORANGE)
+        self._button(draw, (216, control_y, self.width - 16, self.height - 8), "OK", lambda: self._save_editor(self.edit_value), fill=GREEN)
 
     def _draw_numeric_keypad(self, draw: ImageDraw.ImageDraw) -> None:
         keys = (
