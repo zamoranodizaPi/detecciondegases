@@ -33,9 +33,18 @@ MUTED = (169, 181, 194)
 PANEL = (18, 23, 29)
 BLACK = (7, 10, 13)
 LINE = (68, 78, 88)
-TOUCH_HIT_SLOP = 32
-TOUCH_UI_OFFSET_X = -38
-TOUCH_UI_OFFSET_Y = 92
+TOUCH_HIT_SLOP = 8
+
+TOUCH_CONFIG = {
+    "screen_w": 320,
+    "screen_h": 480,
+    "rotation": 90,
+    "swap_xy": True,
+    "invert_x": False,
+    "invert_y": True,
+    "fb_w": None,
+    "fb_h": None,
+}
 
 
 @dataclass(frozen=True)
@@ -54,39 +63,48 @@ class Button:
     action: Callable[[], None]
 
 
+@dataclass(frozen=True)
+class TouchConfig:
+    screen_w: int = 320
+    screen_h: int = 480
+    rotation: int = 90
+    swap_xy: bool = True
+    invert_x: bool = False
+    invert_y: bool = True
+    fb_w: int | None = None
+    fb_h: int | None = None
+    debug: bool = False
+
+
+@dataclass(frozen=True)
+class TouchPoint:
+    raw_x: int
+    raw_y: int
+    ui_x: int
+    ui_y: int
+
+
 class TouchInput:
     def __init__(
         self,
-        width: int,
-        height: int,
-        fb_width: int,
-        fb_height: int,
-        transform: str,
-        swap_xy: bool = False,
-        invert_x: bool = False,
-        invert_y: bool = False,
+        config: TouchConfig,
     ) -> None:
-        self.width = width
-        self.height = height
-        self.fb_width = fb_width
-        self.fb_height = fb_height
-        self.transform = transform
-        self.swap_xy = swap_xy
-        self.invert_x = invert_x
-        self.invert_y = invert_y
+        self.config = config
         self.device = self._open_device()
         self.x: int | None = None
         self.y: int | None = None
         self.touching = False
+        self.min_x = 0
+        self.min_y = 0
         self.max_x = 4095
         self.max_y = 4095
         if self.device is not None:
             self._load_abs_ranges()
 
-    def read_tap(self) -> tuple[int, int] | None:
+    def read_tap(self) -> TouchPoint | None:
         if self.device is None or ecodes is None:
             return None
-        tap: tuple[int, int] | None = None
+        tap: TouchPoint | None = None
         try:
             for event in self.device.read():
                 if event.type == ecodes.EV_ABS:
@@ -99,7 +117,8 @@ class TouchInput:
                         self.touching = True
                     elif self.touching and self.x is not None and self.y is not None:
                         self.touching = False
-                        tap = self._scale(self.x, self.y)
+                        ui_x, ui_y = self.map_touch(self.x, self.y)
+                        tap = TouchPoint(self.x, self.y, ui_x, ui_y)
         except BlockingIOError:
             return tap
         except OSError as exc:
@@ -107,39 +126,60 @@ class TouchInput:
             self.device = None
         return tap
 
-    def _scale(self, raw_x: int, raw_y: int) -> tuple[int, int]:
-        x = int(max(0, min(raw_x, self.max_x)) * (self.fb_width - 1) / max(1, self.max_x))
-        y = int(max(0, min(raw_y, self.max_y)) * (self.fb_height - 1) / max(1, self.max_y))
-        original_x, original_y = x, y
-        x_range = self.fb_width
-        y_range = self.fb_height
-        if self.swap_xy:
+    def map_touch(self, raw_x: int, raw_y: int) -> tuple[int, int]:
+        """
+        Converts XPT2046 raw coordinates into real UI coordinates.
+
+        Every touchscreen event must pass through this function before
+        interacting with UI buttons.
+        """
+        cfg = self.config
+        x = self._normalize(raw_x, self.min_x, self.max_x)
+        y = self._normalize(raw_y, self.min_y, self.max_y)
+
+        if cfg.swap_xy:
             x, y = y, x
-            x_range, y_range = y_range, x_range
-        if self.invert_x:
-            x = x_range - 1 - x
-        if self.invert_y:
-            y = y_range - 1 - y
-        x = max(0, min(x, x_range - 1))
-        y = max(0, min(y, y_range - 1))
-        if self.transform == "rotate90":
-            mapped = (
-                int((y_range - 1 - y) * (self.width - 1) / max(1, y_range - 1)),
-                int(x * (self.height - 1) / max(1, x_range - 1)),
-            )
-        elif (x_range, y_range) != (self.width, self.height):
-            mapped = (
-                int(x * (self.width - 1) / max(1, x_range - 1)),
-                int(y * (self.height - 1) / max(1, y_range - 1)),
-            )
+        if cfg.invert_x:
+            x = 1.0 - x
+        if cfg.invert_y:
+            y = 1.0 - y
+
+        rotation = cfg.rotation % 360
+        if rotation == 0:
+            ui_x, ui_y = x, y
+        elif rotation == 90:
+            ui_x, ui_y = 1.0 - y, x
+        elif rotation == 180:
+            ui_x, ui_y = 1.0 - x, 1.0 - y
+        elif rotation == 270:
+            ui_x, ui_y = y, 1.0 - x
         else:
-            mapped = (x, y)
-        mapped = (
-            max(0, min(mapped[0], self.width - 1)),
-            max(0, min(mapped[1], self.height - 1)),
+            LOGGER.warning("unsupported touch rotation %s; using 0", cfg.rotation)
+            ui_x, ui_y = x, y
+
+        mapped_x = self._to_pixel(ui_x, cfg.screen_w)
+        mapped_y = self._to_pixel(ui_y, cfg.screen_h)
+        LOGGER.info(
+            "touch RAW=(%s,%s) MAPPED=(%s,%s) config rotation=%s swap_xy=%s invert_x=%s invert_y=%s",
+            raw_x,
+            raw_y,
+            mapped_x,
+            mapped_y,
+            rotation,
+            cfg.swap_xy,
+            cfg.invert_x,
+            cfg.invert_y,
         )
-        LOGGER.info("touch raw=%s,%s fb=%s,%s adjusted=%s,%s mapped=%s,%s", raw_x, raw_y, original_x, original_y, x, y, mapped[0], mapped[1])
-        return mapped
+        return mapped_x, mapped_y
+
+    @staticmethod
+    def _normalize(value: int, minimum: int, maximum: int) -> float:
+        span = max(1, maximum - minimum)
+        return max(0.0, min((value - minimum) / span, 1.0))
+
+    @staticmethod
+    def _to_pixel(value: float, size: int) -> int:
+        return max(0, min(int(round(value * (size - 1))), size - 1))
 
     def _load_abs_ranges(self) -> None:
         if self.device is None or ecodes is None:
@@ -147,9 +187,12 @@ class TouchInput:
         caps = self.device.capabilities(absinfo=True)
         for code, info in caps.get(ecodes.EV_ABS, []):
             if code in (ecodes.ABS_X, ecodes.ABS_MT_POSITION_X):
+                self.min_x = info.min
                 self.max_x = max(1, info.max)
             elif code in (ecodes.ABS_Y, ecodes.ABS_MT_POSITION_Y):
+                self.min_y = info.min
                 self.max_y = max(1, info.max)
+        LOGGER.info("touch abs ranges x=%s..%s y=%s..%s", self.min_x, self.max_x, self.min_y, self.max_y)
 
     @staticmethod
     def _open_device() -> InputDevice | None:
@@ -215,16 +258,18 @@ class FramebufferDisplay:
             )
         self.config_manager = config_manager
         runtime = self.config_manager.runtime() if self.config_manager is not None else None
-        self.touch = TouchInput(
-            width,
-            height,
-            self.fb_width,
-            self.fb_height,
-            self.output_transform,
-            swap_xy=runtime.touch_swap_xy if runtime is not None else False,
-            invert_x=runtime.touch_invert_x if runtime is not None else False,
-            invert_y=runtime.touch_invert_y if runtime is not None else False,
+        self.touch_config = TouchConfig(
+            screen_w=width,
+            screen_h=height,
+            rotation=runtime.touch_rotation if runtime is not None else int(TOUCH_CONFIG["rotation"]),
+            swap_xy=runtime.touch_swap_xy if runtime is not None else bool(TOUCH_CONFIG["swap_xy"]),
+            invert_x=runtime.touch_invert_x if runtime is not None else bool(TOUCH_CONFIG["invert_x"]),
+            invert_y=runtime.touch_invert_y if runtime is not None else bool(TOUCH_CONFIG["invert_y"]),
+            fb_w=self.fb_width,
+            fb_h=self.fb_height,
+            debug=runtime.touch_debug if runtime is not None else False,
         )
+        self.touch = TouchInput(self.touch_config)
         self.view = "home"
         self.section = "alarms"
         self.edit_field: ConfigField | None = None
@@ -238,6 +283,7 @@ class FramebufferDisplay:
         self.font_small = self._font(16)
         self._blink_on = False
         self._last_touch_at = time.monotonic()
+        self._last_touch_point: TouchPoint | None = None
 
     def render(self, snapshot: dict[str, object]) -> None:
         self._handle_touch()
@@ -262,6 +308,9 @@ class FramebufferDisplay:
                 self._draw_startup(draw, snapshot, status)
             else:
                 self._draw_home(draw, snapshot)
+
+        if self.touch_config.debug:
+            self._draw_touch_debug(draw)
 
         if self.rotate:
             image = image.rotate(self.rotate, expand=True)
@@ -527,94 +576,22 @@ class FramebufferDisplay:
         tap = self.touch.read_tap()
         if tap is None:
             return
-        mapped_x, mapped_y = tap
-        primary_x, primary_y = self._primary_touch_to_ui(mapped_x, mapped_y)
-        candidates = self._touch_candidates(mapped_x, mapped_y)
+        self._last_touch_point = tap
         self._last_touch_at = time.monotonic()
-        LOGGER.info(
-            "touch tap mapped to %s,%s primary=%s,%s candidates=%s on view %s",
-            mapped_x,
-            mapped_y,
-            primary_x,
-            primary_y,
-            candidates,
-            self.view,
-        )
-        for index, (x, y) in enumerate(candidates):
-            if self._dispatch_touch(x, y, index):
-                return
-        LOGGER.info("touch missed %s buttons", len(self.buttons))
-
-    def _dispatch_touch(self, x: int, y: int, candidate_index: int) -> bool:
-        if self.view == "home" and x >= 180 and y >= 400:
-            LOGGER.info("touch hit home menu hot zone candidate=%s", candidate_index)
-            self._go("menu")
-            return True
+        LOGGER.info("touch event RAW=(%s,%s) MAPPED=(%s,%s) view=%s", tap.raw_x, tap.raw_y, tap.ui_x, tap.ui_y, self.view)
+        hit = False
         for button in reversed(self.buttons):
             x1, y1, x2, y2 = button.rect
             if (
-                x1 - TOUCH_HIT_SLOP <= x <= x2 + TOUCH_HIT_SLOP
-                and y1 - TOUCH_HIT_SLOP <= y <= y2 + TOUCH_HIT_SLOP
+                x1 - TOUCH_HIT_SLOP <= tap.ui_x <= x2 + TOUCH_HIT_SLOP
+                and y1 - TOUCH_HIT_SLOP <= tap.ui_y <= y2 + TOUCH_HIT_SLOP
             ):
-                LOGGER.info("touch hit button %s candidate=%s", button.label, candidate_index)
+                LOGGER.info("BUTTON HIT: true label=%s rect=%s", button.label, button.rect)
                 button.action()
-                return True
-        if self._handle_view_hot_zone(x, y):
-            LOGGER.info("touch hit view hot zone candidate=%s", candidate_index)
-            return True
-        return False
-
-    def _handle_view_hot_zone(self, x: int, y: int) -> bool:
-        if self.view == "menu":
-            if y >= self.height - 72 and x <= 190:
-                LOGGER.info("touch hit menu back hot zone")
-                self._go("home")
-                return True
-            index = self._row_index(y, top=46, bottom=self.height - 78, count=len(self.SECTIONS))
-            if index is not None:
-                section = self.SECTIONS[index]
-                LOGGER.info("touch hit menu row hot zone %s index=%s", section, index)
-                self._open_section(section)
-                return True
-
-        if self.view == "form":
-            fields = [field for field in self.FIELDS if field.section == self.section]
-            if y >= self.height - 72 and x <= 180:
-                LOGGER.info("touch hit form back hot zone")
-                self._go("menu")
-                return True
-            visible_count = min(4, len(fields))
-            index = self._row_index(y, top=46, bottom=self.height - 78, count=visible_count)
-            if index is not None:
-                field = fields[index]
-                LOGGER.info("touch hit form row hot zone %s.%s index=%s", field.section, field.key, index)
-                self._open_editor(field)
-                return True
-
-        return False
-
-    def _primary_touch_to_ui(self, x: int, y: int) -> tuple[int, int]:
-        return (
-            max(0, min(x + TOUCH_UI_OFFSET_X, self.width - 1)),
-            max(0, min(y + TOUCH_UI_OFFSET_Y, self.height - 1)),
-        )
-
-    def _touch_candidates(self, x: int, y: int) -> list[tuple[int, int]]:
-        candidates = [
-            (x + TOUCH_UI_OFFSET_X, y + TOUCH_UI_OFFSET_Y),
-            (x, y),
-            (x, y + TOUCH_UI_OFFSET_Y),
-            (x + TOUCH_UI_OFFSET_X, y),
-        ]
-        unique: list[tuple[int, int]] = []
-        for candidate_x, candidate_y in candidates:
-            point = (
-                max(0, min(candidate_x, self.width - 1)),
-                max(0, min(candidate_y, self.height - 1)),
-            )
-            if point not in unique:
-                unique.append(point)
-        return unique
+                hit = True
+                break
+        if not hit:
+            LOGGER.info("BUTTON HIT: false buttons=%s", len(self.buttons))
 
     @staticmethod
     def _row_index(y: int, top: int, bottom: int, count: int) -> int | None:
@@ -623,6 +600,19 @@ class FramebufferDisplay:
         row_height = max(1, (bottom - top) / count)
         index = int((y - top) / row_height)
         return max(0, min(index, count - 1))
+
+    def _draw_touch_debug(self, draw: ImageDraw.ImageDraw) -> None:
+        point = self._last_touch_point
+        if point is None:
+            return
+        x = point.ui_x
+        y = point.ui_y
+        draw.line((x - 10, y, x + 10, y), fill=YELLOW, width=2)
+        draw.line((x, y - 10, x, y + 10), fill=YELLOW, width=2)
+        draw.ellipse((x - 4, y - 4, x + 4, y + 4), outline=RED, width=2)
+        debug = f"RAW {point.raw_x},{point.raw_y} MAP {point.ui_x},{point.ui_y}"
+        draw.rectangle((4, self.height - 22, self.width - 4, self.height - 4), fill=(0, 0, 0))
+        draw.text((8, self.height - 20), debug, fill=YELLOW, font=self.font_small)
 
     def _apply_inactivity_timeout(self) -> None:
         if self.view != "home" and time.monotonic() - self._last_touch_at >= 10:

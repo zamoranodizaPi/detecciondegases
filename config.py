@@ -27,9 +27,11 @@ DEFAULT_CONFIG = {
         "display_width": "320",
         "display_height": "480",
         "display_rotate": "0",
+        "touch_rotation": "90",
         "touch_swap_xy": "true",
-        "touch_invert_x": "true",
+        "touch_invert_x": "false",
         "touch_invert_y": "true",
+        "touch_debug": "false",
     },
     "network": {
         "mode": "dhcp",
@@ -132,9 +134,11 @@ class RuntimeConfig:
     display_width: int
     display_height: int
     display_rotate: int
+    touch_rotation: int
     touch_swap_xy: bool
     touch_invert_x: bool
     touch_invert_y: bool
+    touch_debug: bool
     network_mode: str
     static_ip: str
     gateway: str
@@ -235,6 +239,7 @@ class ConfigManager:
             ("hardware", "touch_swap_xy"),
             ("hardware", "touch_invert_x"),
             ("hardware", "touch_invert_y"),
+            ("hardware", "touch_debug"),
             ("modbus", "enabled"),
             ("modbus", "read_only"),
             ("modbus", "debug"),
@@ -250,6 +255,9 @@ class ConfigManager:
         bounded_int("hardware", "display_width", 320, 160, 1920)
         bounded_int("hardware", "display_height", 480, 160, 1920)
         bounded_int("hardware", "display_rotate", 0, 0, 270)
+        bounded_int("hardware", "touch_rotation", 90, 0, 270)
+        if self._parser.getint("hardware", "touch_rotation") not in (0, 90, 180, 270):
+            repair("hardware", "touch_rotation", 90)
         if self._parser.getint("hardware", "display_width") == 480 and self._parser.getint("hardware", "display_height") == 320:
             repair("hardware", "display_width", 320)
             repair("hardware", "display_height", 480)
@@ -297,9 +305,11 @@ class ConfigManager:
                 display_width=self._parser.getint("hardware", "display_width"),
                 display_height=self._parser.getint("hardware", "display_height"),
                 display_rotate=self._parser.getint("hardware", "display_rotate"),
+                touch_rotation=self._parser.getint("hardware", "touch_rotation"),
                 touch_swap_xy=self._parser.getboolean("hardware", "touch_swap_xy"),
                 touch_invert_x=self._parser.getboolean("hardware", "touch_invert_x"),
                 touch_invert_y=self._parser.getboolean("hardware", "touch_invert_y"),
+                touch_debug=self._parser.getboolean("hardware", "touch_debug"),
                 network_mode=get("network", "mode"),
                 static_ip=get("network", "static_ip"),
                 gateway=get("network", "gateway"),

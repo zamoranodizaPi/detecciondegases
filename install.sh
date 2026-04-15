@@ -22,9 +22,11 @@ DISPLAY_FRAMEBUFFER="${DISPLAY_FRAMEBUFFER:-/dev/fb1}"
 DISPLAY_WIDTH="${DISPLAY_WIDTH:-320}"
 DISPLAY_HEIGHT="${DISPLAY_HEIGHT:-480}"
 DISPLAY_ROTATE="${DISPLAY_ROTATE:-0}"
+TOUCH_ROTATION="${TOUCH_ROTATION:-90}"
 TOUCH_SWAP_XY="${TOUCH_SWAP_XY:-true}"
-TOUCH_INVERT_X="${TOUCH_INVERT_X:-true}"
+TOUCH_INVERT_X="${TOUCH_INVERT_X:-false}"
 TOUCH_INVERT_Y="${TOUCH_INVERT_Y:-true}"
+TOUCH_DEBUG="${TOUCH_DEBUG:-false}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -174,9 +176,11 @@ if "${APPLY_TOUCH_DEFAULTS}" in ("1", "true", "TRUE", "yes", "YES"):
             "display_width": "${DISPLAY_WIDTH}",
             "display_height": "${DISPLAY_HEIGHT}",
             "display_rotate": "${DISPLAY_ROTATE}",
+            "touch_rotation": "${TOUCH_ROTATION}",
             "touch_swap_xy": "${TOUCH_SWAP_XY}",
             "touch_invert_x": "${TOUCH_INVERT_X}",
             "touch_invert_y": "${TOUCH_INVERT_Y}",
+            "touch_debug": "${TOUCH_DEBUG}",
         }
     })
 PY
