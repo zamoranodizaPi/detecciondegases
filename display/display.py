@@ -220,16 +220,18 @@ class FramebufferDisplay:
         self.font_medium = self._font(22)
         self.font_small = self._font(16)
         self._blink_on = False
+        self._last_touch_at = time.monotonic()
 
     def render(self, snapshot: dict[str, object]) -> None:
         self._handle_touch()
+        self._apply_inactivity_timeout()
         if self.framebuffer.lower() == "none":
             return
 
         image = Image.new("RGB", (self.width, self.height), color=BLACK)
         draw = ImageDraw.Draw(image)
         self.buttons = []
-        self._blink_on = int(time.monotonic() * 2) % 2 == 0
+        self._blink_on = int(time.monotonic() * 5) % 2 == 0
 
         if self.view == "menu":
             self._draw_menu(draw)
@@ -444,6 +446,7 @@ class FramebufferDisplay:
         if tap is None:
             return
         x, y = tap
+        self._last_touch_at = time.monotonic()
         LOGGER.info("touch tap mapped to %s,%s on view %s", x, y, self.view)
         if self.view == "home" and x >= 240 and y >= 80:
             LOGGER.info("touch hit home menu hot zone")
@@ -456,6 +459,11 @@ class FramebufferDisplay:
                 button.action()
                 return
         LOGGER.info("touch missed %s buttons", len(self.buttons))
+
+    def _apply_inactivity_timeout(self) -> None:
+        if self.view != "home" and time.monotonic() - self._last_touch_at >= 10:
+            LOGGER.info("touchscreen inactivity timeout; returning home")
+            self._go("home")
 
     def _open_section(self, section: str) -> None:
         self.section = section
