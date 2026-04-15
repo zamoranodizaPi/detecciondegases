@@ -23,8 +23,8 @@ DEFAULT_CONFIG = {
         "display_height": "320",
         "display_rotate": "0",
         "touch_swap_xy": "false",
-        "touch_invert_x": "false",
-        "touch_invert_y": "false",
+        "touch_invert_x": "true",
+        "touch_invert_y": "true",
     },
     "network": {
         "mode": "dhcp",
