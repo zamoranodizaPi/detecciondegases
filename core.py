@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import socket
 import threading
 import time
@@ -52,7 +53,7 @@ class MeasurementWindow:
     def __init__(self, publish_window: float) -> None:
         self._samples: dict[str, list[float]] = defaultdict(list)
         self.publish_window = publish_window
-        self._last_published = time.monotonic()
+        self._last_published = time.monotonic() - publish_window
 
     def add_sample(self, gas: str, value: float | None) -> None:
         if value is None:
@@ -107,7 +108,8 @@ class GasMonitorCore:
 
     def stop(self) -> None:
         self.stop_event.set()
-        self.oxygen_sensor.close()
+        if self.oxygen_sensor is not None:
+            self.oxygen_sensor.close()
         if self.mics_sensor is not None:
             self.mics_sensor.close()
 
@@ -122,26 +124,32 @@ class GasMonitorCore:
             self.state.refresh_config(runtime)
             self.state.set_ip_address(self._get_ip_address())
 
-            measurements: dict[str, float | None] = {}
-            try:
-                measurements.update(self.oxygen_sensor.read())
+            if runtime.mock_sensors:
+                measurements = self._mock_measurements()
                 self.state.clear_sensor_fault("oxygen")
-            except NoisyOxygenReading as exc:
-                LOGGER.warning("oxygen noisy sample ignored: %s", exc)
-                self.state.clear_sensor_fault("oxygen")
-            except Exception as exc:
-                LOGGER.warning("oxygen sensor read ignored: %s", exc)
-                self.state.set_sensor_fault("oxygen", str(exc))
-
-            if self.mics_sensor is not None:
-                try:
-                    measurements.update(self.mics_sensor.read())
-                    self.state.clear_sensor_fault("mics6814")
-                except Exception as exc:
-                    LOGGER.warning("mics6814 read ignored: %s", exc)
-                    self.state.set_sensor_fault("mics6814", str(exc))
-            else:
                 self.state.clear_sensor_fault("mics6814")
+            else:
+                measurements: dict[str, float | None] = {}
+                try:
+                    if self.oxygen_sensor is not None:
+                        measurements.update(self.oxygen_sensor.read())
+                    self.state.clear_sensor_fault("oxygen")
+                except NoisyOxygenReading as exc:
+                    LOGGER.warning("oxygen noisy sample ignored: %s", exc)
+                    self.state.clear_sensor_fault("oxygen")
+                except Exception as exc:
+                    LOGGER.warning("oxygen sensor read ignored: %s", exc)
+                    self.state.set_sensor_fault("oxygen", str(exc))
+
+                if self.mics_sensor is not None:
+                    try:
+                        measurements.update(self.mics_sensor.read())
+                        self.state.clear_sensor_fault("mics6814")
+                    except Exception as exc:
+                        LOGGER.warning("mics6814 read ignored: %s", exc)
+                        self.state.set_sensor_fault("mics6814", str(exc))
+                else:
+                    self.state.clear_sensor_fault("mics6814")
 
             filtered = self._filter_measurements(measurements)
             for gas, value in filtered.items():
@@ -181,15 +189,18 @@ class GasMonitorCore:
         ):
             self.display = self._build_display(runtime)
         if (
-            runtime.i2c_bus != self.runtime.i2c_bus
+            runtime.mock_sensors != self.runtime.mock_sensors
+            or runtime.i2c_bus != self.runtime.i2c_bus
             or runtime.oxygen_address != self.runtime.oxygen_address
             or runtime.oxygen_factor != self.runtime.oxygen_factor
             or runtime.samples != self.runtime.samples
         ):
-            self.oxygen_sensor.close()
+            if self.oxygen_sensor is not None:
+                self.oxygen_sensor.close()
             self.oxygen_sensor = self._build_oxygen_sensor(runtime)
         if (
-            runtime.mics_enabled != self.runtime.mics_enabled
+            runtime.mock_sensors != self.runtime.mock_sensors
+            or runtime.mics_enabled != self.runtime.mics_enabled
             or runtime.i2c_bus != self.runtime.i2c_bus
             or runtime.mics_address != self.runtime.mics_address
             or runtime.co_factor != self.runtime.co_factor
@@ -203,6 +214,14 @@ class GasMonitorCore:
         if runtime.publish_window != self.runtime.publish_window:
             self.measurement_window.publish_window = runtime.publish_window
         self.runtime = runtime
+
+    def _mock_measurements(self) -> dict[str, float]:
+        return {
+            "oxygen": round(random.uniform(20.4, 21.3), 2),
+            "co": round(random.uniform(0.0, 12.0), 2),
+            "no2": round(random.uniform(0.0, 0.8), 2),
+            "nh3": round(random.uniform(0.0, 8.0), 2),
+        }
 
     def _filter_measurements(self, measurements: dict[str, float | None]) -> dict[str, float | None]:
         max_allowed_jump = {
@@ -237,7 +256,9 @@ class GasMonitorCore:
         )
 
     @staticmethod
-    def _build_oxygen_sensor(runtime) -> OxygenSensor:
+    def _build_oxygen_sensor(runtime) -> OxygenSensor | None:
+        if runtime.mock_sensors:
+            return None
         return OxygenSensor(
             bus_id=runtime.i2c_bus,
             address=runtime.oxygen_address,
@@ -247,7 +268,7 @@ class GasMonitorCore:
 
     @staticmethod
     def _build_mics_sensor(runtime):
-        if not runtime.mics_enabled:
+        if runtime.mock_sensors or not runtime.mics_enabled:
             return None
         return Mics6814Sensor(
             bus_id=runtime.i2c_bus,

@@ -116,6 +116,7 @@ python3 main.py --config config.ini
 
 ## Hardware Notes
 
+- `mock_sensors = true` disables physical sensor reads and shows simulated measurements. Set it to `false` when SEN0322/ADS1115 hardware is connected.
 - MHS-3.5inch RPi Display uses SPI for LCD and touch: GPIO17, GPIO24, GPIO10, GPIO9, GPIO25, GPIO11, GPIO8, and GPIO7.
 - The MHS page marks physical pins 3 and 5 as NC, so sensors stay on the normal Raspberry Pi I2C bus:
   - SDA: physical pin 3 / GPIO2

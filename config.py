@@ -14,6 +14,7 @@ from typing import Any
 DEFAULT_CONFIG = {
     "hardware": {
         "i2c_bus": "1",
+        "mock_sensors": "true",
         "oxygen_address": "0x73",
         "mics_enabled": "true",
         "mics_address": "0x48",
@@ -94,6 +95,7 @@ def verify_password(stored_value: str, provided_password: str) -> bool:
 @dataclass(frozen=True)
 class RuntimeConfig:
     i2c_bus: int
+    mock_sensors: bool
     oxygen_address: int
     mics_enabled: bool
     mics_address: int
@@ -167,6 +169,7 @@ class ConfigManager:
             get = self._parser.get
             return RuntimeConfig(
                 i2c_bus=self._parser.getint("hardware", "i2c_bus"),
+                mock_sensors=self._parser.getboolean("hardware", "mock_sensors"),
                 oxygen_address=int(get("hardware", "oxygen_address"), 0),
                 mics_enabled=self._parser.getboolean("hardware", "mics_enabled"),
                 mics_address=int(get("hardware", "mics_address"), 0),
