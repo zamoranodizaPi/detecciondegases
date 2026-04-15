@@ -303,12 +303,10 @@ class FramebufferDisplay:
         for label, value, unit, color, alarm_label in rows:
             draw.rectangle((0, y, self.width, y + row_h - 1), fill=color)
             draw.text((18, y + 10), label, fill=INK, font=self.font_large)
-            text = self._format_value(value, unit)
-            text_w = self._text_width(draw, text, self.font_xl)
-            draw.text((self.width - text_w - 18, y + 4), text, fill=INK, font=self.font_xl)
-            if alarm_label:
-                draw.rounded_rectangle((178, y + 10, 338, y + 42), radius=5, fill=(20, 20, 20))
-                draw.text((190, y + 16), alarm_label, fill=YELLOW if self._blink_on else RED, font=self.font_small)
+            text = alarm_label if alarm_label and self._blink_on else self._format_value(value, unit)
+            font = self.font_large if alarm_label and self._blink_on else self.font_xl
+            text_w = self._text_width(draw, text, font)
+            draw.text((self.width - text_w - 18, y + 4), text, fill=INK, font=font)
             y += row_h
 
         draw.rectangle((0, y, self.width, self.height), fill=(15, 20, 26))
