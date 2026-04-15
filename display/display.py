@@ -547,32 +547,29 @@ class FramebufferDisplay:
 
     def _handle_view_hot_zone(self, x: int, y: int) -> bool:
         if self.view == "menu":
-            if 40 <= y <= 380:
-                index = int((y - 58) / 52)
-                if index >= len(self.SECTIONS) and y <= 380:
-                    index = len(self.SECTIONS) - 1
-                if 0 <= index < len(self.SECTIONS):
-                    section = self.SECTIONS[index]
-                    LOGGER.info("touch hit menu row hot zone %s", section)
-                    self._open_section(section)
-                    return True
             if y >= self.height - 72 and x <= 190:
                 LOGGER.info("touch hit menu back hot zone")
                 self._go("home")
                 return True
+            index = self._row_index(y, top=46, bottom=self.height - 78, count=len(self.SECTIONS))
+            if index is not None:
+                section = self.SECTIONS[index]
+                LOGGER.info("touch hit menu row hot zone %s index=%s", section, index)
+                self._open_section(section)
+                return True
 
         if self.view == "form":
             fields = [field for field in self.FIELDS if field.section == self.section]
-            if 44 <= y <= 260:
-                index = int((y - 58) / 48)
-                if 0 <= index < min(4, len(fields)):
-                    field = fields[index]
-                    LOGGER.info("touch hit form row hot zone %s.%s", field.section, field.key)
-                    self._open_editor(field)
-                    return True
             if y >= self.height - 72 and x <= 180:
                 LOGGER.info("touch hit form back hot zone")
                 self._go("menu")
+                return True
+            visible_count = min(4, len(fields))
+            index = self._row_index(y, top=46, bottom=280, count=visible_count)
+            if index is not None:
+                field = fields[index]
+                LOGGER.info("touch hit form row hot zone %s.%s index=%s", field.section, field.key, index)
+                self._open_editor(field)
                 return True
 
         if self.view == "edit":
@@ -589,6 +586,13 @@ class FramebufferDisplay:
                 self._save_editor(self.edit_value)
                 return True
             field = self.edit_field
+            if field is not None and field.kind == "choice":
+                index = self._row_index(y, top=100, bottom=300, count=len(field.choices))
+                if index is not None:
+                    value = field.choices[index]
+                    LOGGER.info("touch hit choice hot zone %s index=%s", value, index)
+                    self._save_editor(value)
+                    return True
             if field is not None and field.kind in ("number", "numeric_text"):
                 key = self._numeric_key_at(x, y)
                 if key is not None:
@@ -596,6 +600,14 @@ class FramebufferDisplay:
                     self._add_key(key)
                     return True
         return False
+
+    @staticmethod
+    def _row_index(y: int, top: int, bottom: int, count: int) -> int | None:
+        if count <= 0 or y < top or y > bottom:
+            return None
+        row_height = max(1, (bottom - top) / count)
+        index = int((y - top) / row_height)
+        return max(0, min(index, count - 1))
 
     @staticmethod
     def _numeric_key_at(x: int, y: int) -> str | None:
