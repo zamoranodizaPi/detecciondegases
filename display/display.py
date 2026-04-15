@@ -707,7 +707,13 @@ class FramebufferDisplay:
             return None
         row = max(0, min(int((y - 70) / ((329 - 70) / 4)), 3))
         col = 0 if x < 125 else 1 if x < 220 else 2
-        return keys[row][col]
+        key = keys[row][col]
+        observed_rotation = {
+            "4": "1",
+            "7": "2",
+            "2": "7",
+        }
+        return observed_rotation.get(key, key)
 
     def _apply_inactivity_timeout(self) -> None:
         if self.view != "home" and time.monotonic() - self._last_touch_at >= 10:
