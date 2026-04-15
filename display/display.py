@@ -150,6 +150,15 @@ class FramebufferDisplay:
         self.width = width
         self.height = height
         self.rotate = rotate
+        self.fb_width, self.fb_height = self._framebuffer_size()
+        if self.fb_width and self.fb_height and (self.fb_width, self.fb_height) != (self.width, self.height):
+            LOGGER.info(
+                "framebuffer geometry is %sx%s; rendering layout remains %sx%s",
+                self.fb_width,
+                self.fb_height,
+                self.width,
+                self.height,
+            )
         self.config_manager = config_manager
         self.touch = TouchInput(width, height)
         self.view = "home"
@@ -183,6 +192,7 @@ class FramebufferDisplay:
 
         if self.rotate:
             image = image.rotate(self.rotate, expand=True)
+        image = self._fit_framebuffer(image)
 
         fb_path = Path(self.framebuffer)
         if not fb_path.exists():
@@ -194,6 +204,23 @@ class FramebufferDisplay:
                 handle.write(self._to_rgb565(image))
         except (OSError, ValueError) as exc:
             LOGGER.warning("display render failed: %s", exc)
+
+    def _framebuffer_size(self) -> tuple[int, int]:
+        fb_name = Path(self.framebuffer).name
+        size_path = Path("/sys/class/graphics") / fb_name / "virtual_size"
+        try:
+            width, height = size_path.read_text(encoding="utf-8").strip().split(",", 1)
+            return int(width), int(height)
+        except (OSError, ValueError):
+            return self.width, self.height
+
+    def _fit_framebuffer(self, image: Image.Image) -> Image.Image:
+        target = (self.fb_width, self.fb_height)
+        if image.size == target:
+            return image
+        if image.size[::-1] == target:
+            return image.rotate(90, expand=True)
+        return image.resize(target, Image.Resampling.BILINEAR)
 
     def _draw_home(self, draw: ImageDraw.ImageDraw, snapshot: dict[str, object]) -> None:
         measurements = snapshot["measurements"]
