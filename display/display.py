@@ -33,7 +33,7 @@ MUTED = (169, 181, 194)
 PANEL = (18, 23, 29)
 BLACK = (7, 10, 13)
 LINE = (68, 78, 88)
-TOUCH_HIT_SLOP = 18
+TOUCH_HIT_SLOP = 32
 TOUCH_UI_OFFSET_X = -38
 TOUCH_UI_OFFSET_Y = 92
 
@@ -540,8 +540,6 @@ class FramebufferDisplay:
             candidates,
             self.view,
         )
-        if self.view == "edit" and self._handle_edit_touch(primary_x, primary_y, mapped_x, mapped_y):
-            return
         for index, (x, y) in enumerate(candidates):
             if self._dispatch_touch(x, y, index):
                 return
@@ -593,53 +591,6 @@ class FramebufferDisplay:
                 self._open_editor(field)
                 return True
 
-        if self.view == "edit":
-            field = self.edit_field
-            if field is not None and field.kind == "choice":
-                index = self._row_index(y, top=96, bottom=self.height - 78, count=len(field.choices))
-                if index is not None:
-                    value = field.choices[index]
-                    LOGGER.info("touch hit choice hot zone %s index=%s", value, index)
-                    self._save_editor(value)
-                    return True
-            if field is not None and field.kind in ("number", "numeric_text"):
-                key = self._numeric_key_at(x, y)
-                if key is not None:
-                    LOGGER.info("touch hit numeric keypad hot zone %s", key)
-                    self._add_key(key)
-                    return True
-        return False
-
-    def _handle_edit_touch(self, primary_x: int, primary_y: int, mapped_x: int, mapped_y: int) -> bool:
-        if primary_y >= 400 or mapped_y >= 330:
-            if primary_x <= 125:
-                LOGGER.info("touch hit editor back hot zone direct")
-                self._go("form")
-                return True
-            if primary_x <= 235:
-                LOGGER.info("touch hit editor delete hot zone direct")
-                self._delete_key()
-                return True
-            LOGGER.info("touch hit editor ok hot zone direct")
-            self._save_editor(self.edit_value)
-            return True
-
-        field = self.edit_field
-        if field is None:
-            return False
-        if field.kind == "choice":
-            index = self._row_index(primary_y, top=96, bottom=360, count=len(field.choices))
-            if index is not None:
-                value = field.choices[index]
-                LOGGER.info("touch hit choice hot zone %s direct index=%s", value, index)
-                self._save_editor(value)
-                return True
-        if field.kind in ("number", "numeric_text"):
-            key = self._numeric_key_at_direct(primary_x, primary_y, mapped_x, mapped_y)
-            if key is not None:
-                LOGGER.info("touch hit numeric keypad hot zone %s direct", key)
-                self._add_key(key)
-                return True
         return False
 
     def _primary_touch_to_ui(self, x: int, y: int) -> tuple[int, int]:
@@ -672,48 +623,6 @@ class FramebufferDisplay:
         row_height = max(1, (bottom - top) / count)
         index = int((y - top) / row_height)
         return max(0, min(index, count - 1))
-
-    @staticmethod
-    def _numeric_key_at(x: int, y: int) -> str | None:
-        keys = (
-            ("1", "2", "3"),
-            ("4", "5", "6"),
-            ("7", "8", "9"),
-            (".", "0", "-"),
-        )
-        if y < 96 or y > 330 or x < 0 or x > 319:
-            return None
-        row = max(0, min(int((y - 96) / ((330 - 96) / 4)), 3))
-        col = max(0, min(int(x / (320 / 3)), 2))
-        return keys[row][col]
-
-    @staticmethod
-    def _numeric_key_at_direct(primary_x: int, primary_y: int, mapped_x: int, mapped_y: int) -> str | None:
-        keys = (
-            ("1", "2", "3"),
-            ("4", "5", "6"),
-            ("7", "8", "9"),
-            (".", "0", "-"),
-        )
-        if mapped_y < 70 or mapped_y > 329:
-            return None
-        if mapped_y < 180:
-            y = primary_y
-            x = primary_x
-        else:
-            y = mapped_y
-            x = mapped_x
-        if y < 70 or y > 329 or x < 0 or x > 319:
-            return None
-        row = max(0, min(int((y - 70) / ((329 - 70) / 4)), 3))
-        col = 0 if x < 125 else 1 if x < 220 else 2
-        key = keys[row][col]
-        observed_rotation = {
-            "4": "1",
-            "7": "2",
-            "2": "7",
-        }
-        return observed_rotation.get(key, key)
 
     def _apply_inactivity_timeout(self) -> None:
         if self.view != "home" and time.monotonic() - self._last_touch_at >= 10:
