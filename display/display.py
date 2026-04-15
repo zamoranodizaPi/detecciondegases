@@ -415,7 +415,7 @@ class FramebufferDisplay:
             return
         x, y = tap
         LOGGER.info("touch tap mapped to %s,%s on view %s", x, y, self.view)
-        if self.view == "home" and x >= 300 and y >= 160:
+        if self.view == "home" and x >= 240 and y >= 80:
             LOGGER.info("touch hit home menu hot zone")
             self._go("menu")
             return
