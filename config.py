@@ -236,6 +236,9 @@ class ConfigManager:
         bounded_int("hardware", "display_width", 320, 160, 1920)
         bounded_int("hardware", "display_height", 480, 160, 1920)
         bounded_int("hardware", "display_rotate", 0, 0, 270)
+        if self._parser.getint("hardware", "display_width") == 480 and self._parser.getint("hardware", "display_height") == 320:
+            repair("hardware", "display_width", 320)
+            repair("hardware", "display_height", 480)
         bounded_int("web", "port", 8080, 1, 65535)
         bounded_int("modbus", "port", 5020, 1, 65535)
         bounded_int("sampling", "samples", 10, 1, 120)
