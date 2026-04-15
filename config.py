@@ -22,6 +22,9 @@ DEFAULT_CONFIG = {
         "display_width": "480",
         "display_height": "320",
         "display_rotate": "0",
+        "touch_swap_xy": "false",
+        "touch_invert_x": "false",
+        "touch_invert_y": "false",
     },
     "network": {
         "mode": "dhcp",
@@ -103,6 +106,9 @@ class RuntimeConfig:
     display_width: int
     display_height: int
     display_rotate: int
+    touch_swap_xy: bool
+    touch_invert_x: bool
+    touch_invert_y: bool
     network_mode: str
     static_ip: str
     gateway: str
@@ -177,6 +183,9 @@ class ConfigManager:
                 display_width=self._parser.getint("hardware", "display_width"),
                 display_height=self._parser.getint("hardware", "display_height"),
                 display_rotate=self._parser.getint("hardware", "display_rotate"),
+                touch_swap_xy=self._parser.getboolean("hardware", "touch_swap_xy"),
+                touch_invert_x=self._parser.getboolean("hardware", "touch_invert_x"),
+                touch_invert_y=self._parser.getboolean("hardware", "touch_invert_y"),
                 network_mode=get("network", "mode"),
                 static_ip=get("network", "static_ip"),
                 gateway=get("network", "gateway"),

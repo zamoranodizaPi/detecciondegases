@@ -50,12 +50,25 @@ class Button:
 
 
 class TouchInput:
-    def __init__(self, width: int, height: int, fb_width: int, fb_height: int, transform: str) -> None:
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        fb_width: int,
+        fb_height: int,
+        transform: str,
+        swap_xy: bool = False,
+        invert_x: bool = False,
+        invert_y: bool = False,
+    ) -> None:
         self.width = width
         self.height = height
         self.fb_width = fb_width
         self.fb_height = fb_height
         self.transform = transform
+        self.swap_xy = swap_xy
+        self.invert_x = invert_x
+        self.invert_y = invert_y
         self.device = self._open_device()
         self.x: int | None = None
         self.y: int | None = None
@@ -92,17 +105,27 @@ class TouchInput:
     def _scale(self, raw_x: int, raw_y: int) -> tuple[int, int]:
         x = int(max(0, min(raw_x, self.max_x)) * (self.fb_width - 1) / max(1, self.max_x))
         y = int(max(0, min(raw_y, self.max_y)) * (self.fb_height - 1) / max(1, self.max_y))
+        original_x, original_y = x, y
+        if self.swap_xy:
+            x, y = y, x
+        if self.invert_x:
+            x = self.fb_width - 1 - x
+        if self.invert_y:
+            y = self.fb_height - 1 - y
         if self.transform == "rotate90":
-            return (
+            mapped = (
                 int((self.fb_height - 1 - y) * (self.width - 1) / max(1, self.fb_height - 1)),
                 int(x * (self.height - 1) / max(1, self.fb_width - 1)),
             )
-        if (self.fb_width, self.fb_height) != (self.width, self.height):
-            return (
+        elif (self.fb_width, self.fb_height) != (self.width, self.height):
+            mapped = (
                 int(x * (self.width - 1) / max(1, self.fb_width - 1)),
                 int(y * (self.height - 1) / max(1, self.fb_height - 1)),
             )
-        return x, y
+        else:
+            mapped = (x, y)
+        LOGGER.info("touch raw=%s,%s fb=%s,%s adjusted=%s,%s mapped=%s,%s", raw_x, raw_y, original_x, original_y, x, y, mapped[0], mapped[1])
+        return mapped
 
     def _load_abs_ranges(self) -> None:
         if self.device is None or ecodes is None:
@@ -174,7 +197,17 @@ class FramebufferDisplay:
                 self.height,
             )
         self.config_manager = config_manager
-        self.touch = TouchInput(width, height, self.fb_width, self.fb_height, self.output_transform)
+        runtime = self.config_manager.runtime() if self.config_manager is not None else None
+        self.touch = TouchInput(
+            width,
+            height,
+            self.fb_width,
+            self.fb_height,
+            self.output_transform,
+            swap_xy=runtime.touch_swap_xy if runtime is not None else False,
+            invert_x=runtime.touch_invert_x if runtime is not None else False,
+            invert_y=runtime.touch_invert_y if runtime is not None else False,
+        )
         self.view = "home"
         self.section = "alarms"
         self.edit_field: ConfigField | None = None
@@ -381,11 +414,14 @@ class FramebufferDisplay:
         if tap is None:
             return
         x, y = tap
+        LOGGER.info("touch tap mapped to %s,%s on view %s", x, y, self.view)
         for button in reversed(self.buttons):
             x1, y1, x2, y2 = button.rect
             if x1 <= x <= x2 and y1 <= y <= y2:
+                LOGGER.info("touch hit button %s", button.label)
                 button.action()
                 return
+        LOGGER.info("touch missed %s buttons", len(self.buttons))
 
     def _open_section(self, section: str) -> None:
         self.section = section
