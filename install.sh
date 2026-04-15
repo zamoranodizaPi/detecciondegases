@@ -3,6 +3,8 @@ set -euo pipefail
 
 APP_NAME="gasmonitor"
 INSTALL_DIR="${INSTALL_DIR:-/opt/${APP_NAME}}"
+CONFIG_DIR="${CONFIG_DIR:-/var/lib/${APP_NAME}}"
+CONFIG_PATH="${CONFIG_PATH:-${CONFIG_DIR}/config.ini}"
 SERVICE_NAME="${SERVICE_NAME:-gasmonitor.service}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 APP_USER="${APP_USER:-pi}"
@@ -51,8 +53,13 @@ rsync -a --delete \
 
 echo "[5/8] Ensuring config and log directories exist..."
 mkdir -p "${INSTALL_DIR}/logs"
-if [[ ! -f "${INSTALL_DIR}/config.ini" ]]; then
-  install -m 0644 "${SCRIPT_DIR}/config.ini" "${INSTALL_DIR}/config.ini"
+mkdir -p "${CONFIG_DIR}"
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+  if [[ -f "${INSTALL_DIR}/config.ini" ]]; then
+    install -m 0644 "${INSTALL_DIR}/config.ini" "${CONFIG_PATH}"
+  else
+    install -m 0644 "${SCRIPT_DIR}/config.ini" "${CONFIG_PATH}"
+  fi
 fi
 
 echo "[6/8] Creating virtual environment..."
@@ -69,8 +76,10 @@ sed \
   -e "s|__APP_USER__|${APP_USER}|g" \
   -e "s|__APP_GROUP__|${APP_GROUP}|g" \
   -e "s|__INSTALL_DIR__|${INSTALL_DIR}|g" \
+  -e "s|__CONFIG_PATH__|${CONFIG_PATH}|g" \
   "${INSTALL_DIR}/gasmonitor.service" > "${SERVICE_PATH}"
 chown -R "${APP_USER}:${APP_GROUP}" "${INSTALL_DIR}"
+chown -R "${APP_USER}:${APP_GROUP}" "${CONFIG_DIR}"
 chmod 0644 "${SERVICE_PATH}"
 systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"

@@ -38,7 +38,7 @@ GasMonitor is a modular gas monitoring service for Raspberry Pi 3 with:
 
 ## Configuration
 
-The service auto-creates `config.ini` if it does not exist. Main sections:
+The installed service stores runtime configuration at `/var/lib/gasmonitor/config.ini` so touchscreen and web changes are not overwritten by Git updates. The repository `config.ini` is only the installation template. Main sections:
 
 - `[hardware]`: I2C, MICS path, framebuffer, display geometry
 - `[network]`: DHCP/static network profile values
@@ -100,6 +100,7 @@ The installer:
 - enables I2C and SPI when `raspi-config` is present
 - adds the runtime user to `i2c`, `spi`, `video`, and `input`
 - copies the application to `/opt/gasmonitor`
+- stores editable runtime configuration in `/var/lib/gasmonitor/config.ini`
 - creates `.venv`
 - installs Python dependencies
 - installs `gasmonitor.service`

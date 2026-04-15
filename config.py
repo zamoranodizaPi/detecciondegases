@@ -167,8 +167,12 @@ class ConfigManager:
 
     def save(self) -> None:
         ensure_directory(self.path)
-        with self.path.open("w", encoding="utf-8") as handle:
+        temp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        with temp_path.open("w", encoding="utf-8") as handle:
             self._parser.write(handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, self.path)
 
     def runtime(self) -> RuntimeConfig:
         with self._lock:
