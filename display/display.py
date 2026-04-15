@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -218,6 +219,7 @@ class FramebufferDisplay:
         self.font_large = self._font(32)
         self.font_medium = self._font(22)
         self.font_small = self._font(16)
+        self._blink_on = False
 
     def render(self, snapshot: dict[str, object]) -> None:
         self._handle_touch()
@@ -227,6 +229,7 @@ class FramebufferDisplay:
         image = Image.new("RGB", (self.width, self.height), color=BLACK)
         draw = ImageDraw.Draw(image)
         self.buttons = []
+        self._blink_on = int(time.monotonic() * 2) % 2 == 0
 
         if self.view == "menu":
             self._draw_menu(draw)
@@ -346,6 +349,8 @@ class FramebufferDisplay:
             for choice in field.choices:
                 self._button(draw, (44, y, self.width - 44, y + 48), choice.upper(), lambda value=choice: self._save_editor(value))
                 y += 60
+        elif field.kind == "number":
+            self._draw_numeric_keypad(draw)
         else:
             keys = self._keyboard_keys(field.kind)
             x = 16
@@ -363,6 +368,31 @@ class FramebufferDisplay:
         self._button(draw, (16, self.height - 44, 112, self.height - 8), "BACK", lambda: self._go("form"), fill=(70, 77, 85))
         self._button(draw, (126, self.height - 44, 238, self.height - 8), "DEL", self._delete_key, fill=ORANGE)
         self._button(draw, (self.width - 128, self.height - 44, self.width - 16, self.height - 8), "OK", lambda: self._save_editor(self.edit_value), fill=GREEN)
+
+    def _draw_numeric_keypad(self, draw: ImageDraw.ImageDraw) -> None:
+        keys = (
+            ("1", "2", "3"),
+            ("4", "5", "6"),
+            ("7", "8", "9"),
+            (".", "0", "-"),
+        )
+        key_w = 92
+        key_h = 34
+        gap = 8
+        start_x = 96
+        start_y = 104
+        for row_index, row in enumerate(keys):
+            for col_index, key in enumerate(row):
+                x = start_x + col_index * (key_w + gap)
+                y = start_y + row_index * (key_h + gap)
+                self._button(
+                    draw,
+                    (x, y, x + key_w, y + key_h),
+                    key,
+                    lambda k=key: self._add_key(k),
+                    fill=(37, 49, 62),
+                    font=self.font_medium,
+                )
 
     def _button(
         self,
@@ -522,7 +552,7 @@ class FramebufferDisplay:
         numeric = float(value)
         runtime = self.config_manager.runtime() if self.config_manager is not None else None
         if gas == "co" and alarms.get("co_high"):
-            return RED
+            return RED if self._blink_on else YELLOW
         if gas == "co" and runtime is not None:
             if numeric >= runtime.co_high:
                 return RED
@@ -533,7 +563,7 @@ class FramebufferDisplay:
             return GREEN
         if gas == "oxygen":
             if alarms.get("oxygen_low") or alarms.get("oxygen_high"):
-                return RED
+                return RED if self._blink_on else YELLOW
             if runtime is not None:
                 low_span = max(0.1, 20.9 - runtime.oxygen_low)
                 high_span = max(0.1, runtime.oxygen_high - 20.9)
@@ -548,14 +578,14 @@ class FramebufferDisplay:
             return GREEN
         if gas == "nh3":
             if numeric >= 50:
-                return RED
+                return RED if self._blink_on else YELLOW
             if numeric >= 25:
                 return ORANGE
             if numeric >= 10:
                 return YELLOW
         if gas == "no2":
             if numeric >= 5:
-                return RED
+                return RED if self._blink_on else YELLOW
             if numeric >= 2:
                 return ORANGE
             if numeric >= 1:
