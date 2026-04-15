@@ -293,19 +293,22 @@ class FramebufferDisplay:
         draw.text((330, 14), str(snapshot.get("status", "BOOT")), fill=self._status_color(str(snapshot.get("status", ""))), font=self.font_medium)
 
         rows = (
-            ("CO", measurements.get("co"), "ppm", self._gas_color("co", measurements.get("co"), alarms)),
-            ("Oxygen", measurements.get("oxygen"), "%", self._gas_color("oxygen", measurements.get("oxygen"), alarms)),
-            ("NH3", measurements.get("nh3"), "ppm", self._gas_color("nh3", measurements.get("nh3"), alarms)),
-            ("NO2", measurements.get("no2"), "ppm", self._gas_color("no2", measurements.get("no2"), alarms)),
+            ("CO", measurements.get("co"), "ppm", self._gas_color("co", measurements.get("co"), alarms), self._alarm_label("co", measurements.get("co"), alarms)),
+            ("Oxygen", measurements.get("oxygen"), "%", self._gas_color("oxygen", measurements.get("oxygen"), alarms), self._alarm_label("oxygen", measurements.get("oxygen"), alarms)),
+            ("NH3", measurements.get("nh3"), "ppm", self._gas_color("nh3", measurements.get("nh3"), alarms), self._alarm_label("nh3", measurements.get("nh3"), alarms)),
+            ("NO2", measurements.get("no2"), "ppm", self._gas_color("no2", measurements.get("no2"), alarms), self._alarm_label("no2", measurements.get("no2"), alarms)),
         )
         y = 48
         row_h = 54
-        for label, value, unit, color in rows:
+        for label, value, unit, color, alarm_label in rows:
             draw.rectangle((0, y, self.width, y + row_h - 1), fill=color)
             draw.text((18, y + 10), label, fill=INK, font=self.font_large)
             text = self._format_value(value, unit)
             text_w = self._text_width(draw, text, self.font_xl)
             draw.text((self.width - text_w - 18, y + 4), text, fill=INK, font=self.font_xl)
+            if alarm_label:
+                draw.rounded_rectangle((178, y + 10, 338, y + 42), radius=5, fill=(20, 20, 20))
+                draw.text((190, y + 16), alarm_label, fill=YELLOW if self._blink_on else RED, font=self.font_small)
             y += row_h
 
         draw.rectangle((0, y, self.width, self.height), fill=(15, 20, 26))
@@ -607,6 +610,36 @@ class FramebufferDisplay:
             if numeric >= 1:
                 return YELLOW
         return GREEN
+
+    def _alarm_label(self, gas: str, value: object, alarms: dict[str, object]) -> str:
+        if value is None:
+            return ""
+        numeric = float(value)
+        runtime = self.config_manager.runtime() if self.config_manager is not None else None
+        if gas == "oxygen":
+            if alarms.get("oxygen_low"):
+                return "LOW ALARM"
+            if alarms.get("oxygen_high"):
+                return "HIGH ALARM"
+        if gas == "co" and alarms.get("co_high"):
+            return "HIGH ALARM"
+        if gas == "nh3" and numeric >= 50:
+            return "DANGER HIGH"
+        if gas == "no2" and numeric >= 5:
+            return "DANGER HIGH"
+        if runtime is not None and gas == "co":
+            if numeric >= runtime.co_high * 0.85:
+                return "HIGH WARN"
+            if numeric >= runtime.co_high * 0.70:
+                return "ATTENTION"
+        if runtime is not None and gas == "oxygen":
+            low_span = max(0.1, 20.9 - runtime.oxygen_low)
+            high_span = max(0.1, runtime.oxygen_high - 20.9)
+            if numeric < runtime.oxygen_low + low_span * 0.35:
+                return "LOW WARN"
+            if numeric > runtime.oxygen_high - high_span * 0.35:
+                return "HIGH WARN"
+        return ""
 
     @staticmethod
     def _text_width(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont) -> int:
