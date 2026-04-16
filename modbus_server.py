@@ -17,10 +17,17 @@ from pymodbus.server import StartTcpServer
 
 from config import ConfigManager, RuntimeConfig
 from register_map import (
+    ALARM_SENSOR_FAILURE,
+    ERROR_INVALID_READING,
     HOLDING_REGISTER_COUNT,
+    HR_ALARM_STATUS,
+    HR_ERROR_CODE,
     HR_FORCE_CALIBRATION,
+    HR_OXYGEN_X10,
     HR_REBOOT_DEVICE,
     HR_RESET_ALARMS,
+    HR_DEVICE_STATUS,
+    DEVICE_SENSOR_FAULT,
     build_register_snapshot,
 )
 from shared_state import SharedState
@@ -99,6 +106,7 @@ class IndustrialModbusServer:
         self.shared_state = shared_state
         runtime = config_manager.runtime()
         self.register_block = IndustrialRegisterBlock(self._handle_control_write, runtime.modbus_read_only)
+        self._last_valid_registers = [0] * HOLDING_REGISTER_COUNT
         self._context = self._build_context()
         self._stop_event = threading.Event()
         self._updater: threading.Thread | None = None
@@ -166,12 +174,40 @@ class IndustrialModbusServer:
                 self.register_block.set_read_only(runtime.modbus_read_only)
                 snapshot = self.shared_state.snapshot()
                 registers = build_register_snapshot(snapshot)
-                self.register_block.update_process_values(registers.values)
+                values = self._sanitize_registers(registers.values, snapshot)
+                self.register_block.update_process_values(values)
                 if runtime.modbus_debug:
-                    LOGGER.info("modbus registers 40001-40008: %s", registers.values[:8])
+                    LOGGER.info("modbus registers 40001-40008: %s", values[:8])
             except Exception as exc:
                 LOGGER.exception("modbus register update failed: %s", exc)
             time.sleep(1.0)
+
+    def _sanitize_registers(self, values: list[int], snapshot: dict[str, object]) -> list[int]:
+        sanitized = [int(value) & 0xFFFF for value in values[:HOLDING_REGISTER_COUNT]]
+        if len(sanitized) < HOLDING_REGISTER_COUNT:
+            sanitized.extend([0] * (HOLDING_REGISTER_COUNT - len(sanitized)))
+
+        oxygen_x10 = sanitized[HR_OXYGEN_X10]
+        measurements = snapshot.get("measurements", {})
+        oxygen_present = isinstance(measurements, dict) and measurements.get("oxygen") is not None
+        status = str(snapshot.get("status", "BOOT"))
+        if not oxygen_present and status in ("BOOT", "WARMUP"):
+            return sanitized
+        if oxygen_x10 <= 0 or oxygen_x10 > 250:
+            previous = self._last_valid_registers[HR_OXYGEN_X10]
+            sanitized[HR_OXYGEN_X10] = previous if 0 < previous <= 250 else 0
+            sanitized[HR_DEVICE_STATUS] = DEVICE_SENSOR_FAULT
+            sanitized[HR_ALARM_STATUS] |= ALARM_SENSOR_FAILURE
+            sanitized[HR_ERROR_CODE] = ERROR_INVALID_READING
+            LOGGER.warning(
+                "modbus oxygen value rejected out of range raw_register=%s retained=%s",
+                oxygen_x10,
+                sanitized[HR_OXYGEN_X10],
+            )
+        else:
+            self._last_valid_registers[HR_OXYGEN_X10] = oxygen_x10
+
+        return sanitized
 
     def _handle_control_write(self, register: int, value: int) -> None:
         if value != 1:

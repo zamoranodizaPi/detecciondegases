@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -52,7 +53,13 @@ class RegisterSnapshot:
 def clamp_u16(value: float | int | None) -> int:
     if value is None:
         return 0
-    return max(0, min(int(round(value)), 0xFFFF))
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(numeric):
+        return 0
+    return max(0, min(int(round(numeric)), 0xFFFF))
 
 
 def build_register_snapshot(snapshot: dict[str, object]) -> RegisterSnapshot:

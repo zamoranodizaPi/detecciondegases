@@ -24,6 +24,8 @@ Most SCADA tools display holding registers as `4xxxx` addresses. Internally, Mod
 | `40007` | `6` | System state | `UINT16` | state code |
 | `40008` | `7` | Error code | `UINT16` | error code |
 
+The Modbus publisher rejects oxygen values outside `0.1..25.0 %`. If an invalid oxygen value reaches the Modbus layer, register `40001` keeps the last valid oxygen value when available, sets device status to sensor fault, sets the sensor-failure alarm bit, and reports error code `3`.
+
 ## Device Status
 
 | Code | Meaning |
