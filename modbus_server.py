@@ -32,6 +32,7 @@ LOGGER = logging.getLogger(__name__)
 class IndustrialRegisterBlock(ModbusSequentialDataBlock):
     def __init__(self, control_handler: Callable[[int, int], None], read_only: bool = True) -> None:
         super().__init__(0, [0] * HOLDING_REGISTER_COUNT)
+        self._process_values = [0] * HOLDING_REGISTER_COUNT
         self._lock = threading.RLock()
         self._control_handler = control_handler
         self._read_only = read_only
@@ -43,11 +44,18 @@ class IndustrialRegisterBlock(ModbusSequentialDataBlock):
     def update_process_values(self, values: list[int]) -> None:
         with self._lock:
             for index, value in enumerate(values[:HOLDING_REGISTER_COUNT]):
+                self._process_values[index] = value & 0xFFFF
                 self.values[index] = value & 0xFFFF
 
     def getValues(self, address: int, count: int = 1) -> list[int]:
         with self._lock:
-            return list(super().getValues(address, count))
+            start = self._read_start_index(address)
+            end = min(start + count, HOLDING_REGISTER_COUNT)
+            values = self._process_values[start:end]
+            if len(values) < count:
+                values.extend([0] * (count - len(values)))
+            LOGGER.debug("modbus read hr address=%s count=%s mapped_start=%s values=%s", address, count, start, values)
+            return values
 
     def setValues(self, address: int, values: list[int]) -> None:
         with self._lock:
@@ -55,7 +63,7 @@ class IndustrialRegisterBlock(ModbusSequentialDataBlock):
                 LOGGER.warning("modbus write rejected at address=%s: read-only mode", address)
                 return
             for offset, value in enumerate(values):
-                register = address + offset
+                register = self._write_register_index(address + offset)
                 if register in (HR_RESET_ALARMS, HR_REBOOT_DEVICE, HR_FORCE_CALIBRATION):
                     if int(value) == 1:
                         LOGGER.info("modbus control write accepted register=%s value=%s", register, value)
@@ -64,6 +72,25 @@ class IndustrialRegisterBlock(ModbusSequentialDataBlock):
                         LOGGER.warning("modbus control write rejected register=%s invalid value=%s", register, value)
                     continue
                 LOGGER.warning("modbus write rejected at %s: register is not writable", register)
+
+    @staticmethod
+    def _read_start_index(address: int) -> int:
+        if 40001 <= address <= 40000 + HOLDING_REGISTER_COUNT:
+            return address - 40001
+        if address <= 0:
+            return 0
+        return max(0, address - 1)
+
+    @staticmethod
+    def _write_register_index(address: int) -> int:
+        if 40001 <= address <= 40000 + HOLDING_REGISTER_COUNT:
+            return address - 40001
+        if address in (HR_RESET_ALARMS, HR_REBOOT_DEVICE, HR_FORCE_CALIBRATION):
+            return address
+        shifted = address - 1
+        if shifted in (HR_RESET_ALARMS, HR_REBOOT_DEVICE, HR_FORCE_CALIBRATION):
+            return shifted
+        return address
 
 
 class IndustrialModbusServer:
