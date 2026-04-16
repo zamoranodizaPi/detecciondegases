@@ -129,6 +129,7 @@ The installer:
 
 - installs required OS packages
 - enables SPI and configures a sensor I2C GPIO bus on GPIO20/GPIO21
+- configures real sensor mode by default: `mock_sensors=false`
 - adds the runtime user to `i2c`, `spi`, `video`, and `input`
 - installs the generic 3.5 inch SPI LCD driver from `goodtft/LCD-show` when `/dev/fb1` is not present
 - applies the touchscreen transform through one central mapping layer: `touch_rotation=90`, `touch_swap_xy=true`, `touch_invert_x=false`, `touch_invert_y=true`
@@ -160,6 +161,9 @@ sudo LCD_DRIVER_SCRIPT=LCD35-show LCD_ROTATION=0 ./install.sh
 
 # Override the sensor I2C GPIO bus if needed
 sudo I2C_BUS=3 I2C_SDA_GPIO=20 I2C_SCL_GPIO=21 ./install.sh
+
+# Install in demo mode if sensors are not connected
+sudo MOCK_SENSORS=true ./install.sh
 ```
 
 The known working display defaults are:
@@ -238,7 +242,7 @@ python3 main.py --config config.ini
 
 ## Hardware Notes
 
-- `mock_sensors = true` disables physical sensor reads and shows simulated measurements. Set it to `false` when SEN0322/ADS1115 hardware is connected.
+- `mock_sensors = false` enables physical sensor reads. Set it to `true` only for demo mode without sensors.
 - MHS-3.5inch RPi Display uses SPI for LCD and touch: GPIO17, GPIO24, GPIO10, GPIO9, GPIO25, GPIO11, GPIO8, and GPIO7.
 - Sensor I2C is moved away from physical pins 3 and 5 because the 3.5 inch display blocks that area:
   - SDA: physical pin 38 / GPIO20

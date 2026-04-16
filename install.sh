@@ -15,6 +15,7 @@ CONFIG_BOOT_FILE="${CONFIG_BOOT_FILE:-auto}"
 I2C_BUS="${I2C_BUS:-3}"
 I2C_SDA_GPIO="${I2C_SDA_GPIO:-20}"
 I2C_SCL_GPIO="${I2C_SCL_GPIO:-21}"
+MOCK_SENSORS="${MOCK_SENSORS:-false}"
 BACKUP_ROOT="${BACKUP_ROOT:-/var/backups/${APP_NAME}}"
 INSTALL_LCD_DRIVER="${INSTALL_LCD_DRIVER:-auto}"
 LCD_SHOW_REPO="${LCD_SHOW_REPO:-https://github.com/goodtft/LCD-show.git}"
@@ -104,6 +105,19 @@ configure_i2c_gpio_overlay() {
   } > "${boot_config}"
   rm -f "${temp_file}"
   echo "Configured sensor I2C bus /dev/i2c-${I2C_BUS} on GPIO${I2C_SDA_GPIO}/GPIO${I2C_SCL_GPIO} in ${boot_config}"
+}
+
+verify_sensor_i2c_bus() {
+  local bus_path="/dev/i2c-${I2C_BUS}"
+  if [[ ! -e "${bus_path}" ]]; then
+    echo "Sensor I2C bus ${bus_path} is not present yet. Reboot is required after overlay changes."
+    return
+  fi
+  echo "Sensor I2C bus ${bus_path} is present."
+  if command -v i2cdetect >/dev/null 2>&1; then
+    echo "I2C scan for bus ${I2C_BUS}; expected devices: 0x48 ADS1115, 0x73 oxygen sensor."
+    i2cdetect -y "${I2C_BUS}" || true
+  fi
 }
 
 install_lcd_driver() {
@@ -213,7 +227,7 @@ echo "[10/12] Validating display/touch config and auto-repairing runtime config.
 (cd "${INSTALL_DIR}" && "${INSTALL_DIR}/.venv/bin/python" - <<PY
 from config import ConfigManager
 manager = ConfigManager("${CONFIG_PATH}")
-manager.update({"hardware": {"i2c_bus": "${I2C_BUS}"}})
+manager.update({"hardware": {"i2c_bus": "${I2C_BUS}", "mock_sensors": "${MOCK_SENSORS}"}})
 if "${APPLY_TOUCH_DEFAULTS}" in ("1", "true", "TRUE", "yes", "YES"):
     manager.update({
         "hardware": {
@@ -249,8 +263,10 @@ install_lcd_driver
 if [[ "${ENABLE_INTERFACES}" == "1" ]]; then
   configure_i2c_gpio_overlay
 fi
+verify_sensor_i2c_bus
 systemctl restart "${SERVICE_NAME}"
 
 echo "Installation complete. Check with: sudo systemctl status ${SERVICE_NAME}"
 echo "Runtime config: ${CONFIG_PATH}"
+echo "Sensor mode: mock_sensors=${MOCK_SENSORS}; I2C bus=/dev/i2c-${I2C_BUS}; SDA=GPIO${I2C_SDA_GPIO}; SCL=GPIO${I2C_SCL_GPIO}"
 echo "Backups, if any: ${BACKUP_ROOT}/${TIMESTAMP}"
